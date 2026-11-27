@@ -1,6 +1,6 @@
 # thsmacosauto
 
-独立的同花顺 macOS AX 自动化 HTTP 服务。股票系统在服务端通过 HTTP 调用，本项目不依赖股票网页、策略、行情采集、数据库或其登录会话。首版不提供买入、卖出、撤单或量化执行接口。
+独立的同花顺 macOS AX 自动化 HTTP 服务。默认服务只读，不开放买入、卖出、撤单或量化执行。手动下单与单笔撤单有独立的 [交易接口候选](docs/manual-trade-api.md)，尚未开放实盘。
 
 ## 安装与启动
 
@@ -22,23 +22,35 @@ python3 -m venv .venv
 
 ## HTTP API
 
-仅绑定回环；所有路由都需要 `Authorization: Bearer …`，返回 JSON、`Cache-Control: no-store`。供本机服务端调用，不应把令牌下发给浏览器，也不要将端口直接暴露到公网。跨设备请在部署时独立设计受控的服务器侧代理或隧道。
+详见 [HTTP 接口文档（v1）](docs/http-api.md)：请求与响应字段、登录与刷新状态、错误处理和股票系统接入示例。
+
+仅绑定回环；所有路由都需要 `Authorization: Bearer <令牌>`。POST 使用 `Content-Type: application/json`，响应带 `Cache-Control: no-store`。不要把令牌下发给浏览器或把端口直接暴露到公网。跨设备请通过受控的服务器侧代理或隧道接入。
 
 | 方法和路由 | 用途 |
 |---|---|
 | `GET /v1/health`、`GET /v1/capabilities` | 进程状态、可调用路由；不证明桌面已登录 |
-| `GET /v1/login/status` | 被动观察当前交易登录状态，不输入、不提交 |
-| `POST /v1/operator/trade-page` | `{"action":"ensure-login"}` 显式一次登录请求；也支持 `inspect`、`switch`、`login-inspect`、`login-open`、`retry-login`、`fresh-login`，后两项保留既有历史授权和账本前置条件 |
-| `GET /v1/real/native-current-panel`、`GET /v1/real/positions-panel` | 当前面板、被动读取已显示的持仓；`total` 与 `available` 分开 |
+| `GET /v1/login/status` | 只观察交易登录状态，不读密码、不点击、不提交 |
+| `POST /v1/login` | 请求体为 `{}`。显式发起原有登录流程，密码从本机私有配置读取；已登录则不读密码、不操作界面 |
+| `GET /v1/holdings` | 只读取当前持仓面板；不登录、不刷新、不切页。`total` 为实际持仓数量，`available` 为可卖数量 |
+| `GET /v1/holdings/refresh/controls` | 识别并核验唯一合格的刷新按钮，不点击 |
+| `POST /v1/holdings/refresh` | 发送 `{"request_id":"唯一操作标识","control_fingerprint":"识别接口返回的原值"}`，只执行刷新，不返回持仓列表 |
+| `GET /v1/holdings/refresh/status` | 查询当前进程的刷新回执，不调用 AX，不构造桌面适配器 |
+| `GET /v1/real/native-current-panel` | 当前面板诊断 |
 | `GET /v1/real/positions`、`GET /v1/real/positions-scope-diagnostic` | 严格持仓与账户覆盖诊断；可能切换面板，默认不允许导航 |
 | `GET /v1/real/account-observation`、`GET /v1/real/orders`、`GET /v1/real/trades` | 资金/账户观察、委托、成交；账户范围不足时拒绝，可能按配置切页后复位 |
-| `GET /v1/real/holdings-refresh-controls` | 仅识别当前持仓页上的唯一合格刷新按钮，不点击 |
-| `POST /v1/real/holdings-refresh` | 发送 `{"request_id":"唯一操作标识","control_fingerprint":"识别接口返回的原值"}`，同一启动周期至多一次点击 |
-| `GET /v1/real/holdings-refresh-status` | 读取本进程的刷新回执，不调用 AX |
+
+旧路径仍兼容：`/v1/real/positions-panel` 和原 `/v1/real/holdings-refresh*` 使用相同实现与刷新状态；`POST /v1/operator/trade-page` 继续支持 `ensure-login`、`inspect`、`switch`、`login-inspect`、`login-open`、`retry-login`、`fresh-login`。历史恢复仍受原授权和账本约束，不会由普通查询或登录请求自动触发。
 
 持仓面板是 `CLIENT_TABLE_ONLY`；其读取时间不是券商更新时间，不保证完整账户覆盖。刷新 token 有效期 30 秒；按钮、窗口、账户或覆盖无法核验时拒绝。`REFRESH_DISPATCH_ACKNOWLEDGED` 仅表示 AX 点击和随后的界面读回，不证明券商已完成查询。请求超时或结果不明，只查询回执，不重发 POST；刷新回执不跨进程保留，不用重启来重试。登录历史另有持久化记录，不覆盖旧 `UNKNOWN`。
 
 股票系统接入：在后端配置 `http://127.0.0.1:18880` 和 Bearer 文件路径，保留自己的用户鉴权、估值与策略逻辑。按需要读取接口；登录和刷新 POST 只由用户明确操作触发。服务内部的 `_broker` / `_ax` 不是供股票系统 import 的公共 API。
+
+## 代码边界
+
+- `api.py` 负责 HTTP 路由和请求分发；所有桌面操作仍共用一个 Broker 队列和同一桌面所有权。
+- `_broker/holdings.py` 负责持仓查询和范围校验，`holdings_refresh.py` 独立管理刷新控制、令牌和回执。
+- `_broker/login_status.py` 只负责观察；`login_entry.py` 单独负责打开登录框；`login_auto.py`、`login_retry.py` 负责显式登录和受限恢复。
+- `_broker/trade_navigation.py` 负责交易页检查和切换，`native_backend.py` 保留共享 AX 适配和所有权边界。模块按职责拆分，不拆成多个桌面执行进程。
 
 ## 验证范围
 

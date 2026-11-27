@@ -1,5 +1,5 @@
 """Standalone loopback service; all native calls use one existing Broker worker."""
-import copy
+
 from pathlib import Path
 import re
 from types import MappingProxyType
@@ -7,43 +7,96 @@ from types import MappingProxyType
 from ._broker import engine, gui_ownership, readonly_budget, server
 from ._broker.private_policy_read import literal
 
-READS = frozenset({'/v1/health', '/v1/capabilities', '/v1/login/status',
-                   '/v1/real/native-current-panel', '/v1/real/positions-panel',
-                   '/v1/real/positions', '/v1/real/positions-scope-diagnostic',
-                   '/v1/real/account-observation', '/v1/real/orders', '/v1/real/trades',
-                   '/v1/real/holdings-refresh-controls', '/v1/real/holdings-refresh-status'})
-OPERATOR = '/v1/operator/trade-page'
+LOGIN = '/v1/login'
+LOGIN_STATUS = '/v1/login/status'
+OPERATOR = '/v1/operator/trade-page'  # Legacy action envelope.
+HOLDINGS = '/v1/holdings'
+HOLDINGS_REFRESH = HOLDINGS + '/refresh'
 REFRESH = '/v1/real/holdings-refresh'
-POSTS = MappingProxyType({OPERATOR: frozenset({'action'}), REFRESH: frozenset({'request_id', 'control_fingerprint'})})
+REFRESH_FIELDS = frozenset({'request_id', 'control_fingerprint'})
+REFRESH_STATUS = frozenset({HOLDINGS_REFRESH + '/status', REFRESH + '-status'})
+TABLE_READS = MappingProxyType({
+    HOLDINGS: 'positions-panel',
+    HOLDINGS + '/summary': 'positions-panel-summary',
+    '/v1/real/positions-panel': 'positions-panel',
+    '/v1/real/positions': 'positions',
+    '/v1/real/positions-scope-diagnostic': 'positions-scope-diagnostic',
+    HOLDINGS_REFRESH + '/controls': 'holdings-refresh-controls',
+    REFRESH + '-controls': 'holdings-refresh-controls',
+    '/v1/real/native-current-panel': 'current',
+    '/v1/real/account-observation': 'account',
+    '/v1/account/available-cash': 'available-cash',
+    '/v1/real/form-discovery': 'form-discovery',
+    '/v1/real/orders': 'orders',
+    '/v1/real/trades': 'trades',
+})
+LOOKUPS = MappingProxyType({
+    HOLDINGS + '/lookup': (HOLDINGS, 'symbol', r'[0-9]{6}', 'positions', 'position'),
+    '/v1/real/orders/lookup': ('/v1/real/orders', 'contract_id', server.REQUEST_ID_PATTERN, 'orders', 'order'),
+    '/v1/real/trades/lookup': ('/v1/real/trades', 'contract_id', server.REQUEST_ID_PATTERN, 'trades', 'trades'),
+})
+READS = frozenset({'/v1/health', '/v1/capabilities', LOGIN_STATUS, *REFRESH_STATUS, *TABLE_READS, *LOOKUPS})
+POSTS = MappingProxyType({LOGIN: frozenset(), OPERATOR: frozenset({'action'}),
+                          HOLDINGS_REFRESH: REFRESH_FIELDS, REFRESH: REFRESH_FIELDS})
 
 
 class Handler(server.RequestHandler):
     get_paths = READS
     post_keys = POSTS
+    get_queries = MappingProxyType({path: spec[1:3] for path, spec in LOOKUPS.items()})
+
+
+def _lookup_result(report, spec, value):
+    _, key, _, source_rows, output = spec
+    matches = [row for row in report[source_rows] if row[key] == value]
+    if output != 'trades' and len(matches) > 1:
+        raise engine.ServiceError('BACKEND_UNAVAILABLE', 503)
+    result = {k: report[k] for k in (
+        'mode', 'panel', 'captured_start_ms', 'captured_end_ms', 'captured_at_ms',
+        'query_filters', 'scope_status', 'observed_market_count', 'missing_market_count',
+        'positions_complete', 'freshness_basis', 'upstream_freshness', 'broker_as_of_ms',
+    ) if k in report}
+    result.update(status='VISIBLE_MATCH_FOUND' if matches else 'NOT_FOUND_IN_VISIBLE_SCOPE',
+                  match_count=len(matches), completeness_scope='AX_EXPOSED_ROWS_ONLY',
+                  account_or_history_complete=False, execution_enabled=False)
+    result[key] = value
+    result[output] = matches if output == 'trades' else next(iter(matches), None)
+    if output == 'trades':
+        result.update(native_fill_qualified=False, independent_fill_verified=False)
+    return result
 
 
 class ReadOnlyEngine(engine.Engine):
-    READS = {**engine.Engine.READS, '/v1/real/holdings-refresh-controls': 'holdings-refresh-controls'}
+    READS = TABLE_READS
 
-    def _refresh(self, payload):
+    def _run_refresh(self, operation):
         budget = readonly_budget.ReadBudget(read_only=True)
-
-        def operation():
+        def bound():
             with readonly_budget.bind(budget):
                 budget.check()
-                if payload is None:
-                    receipt = getattr(self._backend, '_refresh_receipt', None)
-                    return copy.deepcopy(receipt) if receipt else {'status': 'REFRESH_NOT_CLAIMED', 'execution_enabled': False}
-                return self._get_backend().holdings_refresh_budgeted(payload, budget=budget)
+                return operation(budget)
+        return self._run_budgeted(bound, None, [False, {}], budget)
 
-        return self._run_budgeted(operation, None, [False, {}], budget)
+    def _refresh_status(self, _budget):
+        refresh = getattr(self._backend, 'holdings_refresh', None)
+        receipt = refresh.receipt() if refresh is not None else None
+        return receipt or {'status': 'REFRESH_NOT_CLAIMED', 'execution_enabled': False}
 
     def dispatch(self, method, path, payload=None):
+        route, _, query = path.partition('?')
+        if method == 'GET' and route in LOOKUPS:
+            spec = LOOKUPS[route]
+            try:
+                value = server.single_query(query, *spec[1:3])[spec[1]]
+            except server.Rejected as exc:
+                raise engine.ServiceError(exc.code, 400) from None
+            # The source read owns capture, validation and panel restoration.
+            return _lookup_result(super().dispatch(method, spec[0]), spec, value)
         if method == 'GET' and path in READS:
-            if path == '/v1/login/status':
-                return super().dispatch('POST', OPERATOR, {'action': 'login-status'})
-            if path == '/v1/real/holdings-refresh-status':
-                return self._refresh(None)
+            if path == LOGIN_STATUS:
+                return self._run_operator(lambda backend, budget: backend.login_status(budget=budget))
+            if path in REFRESH_STATUS:
+                return self._run_refresh(self._refresh_status)
             if path == '/v1/capabilities':
                 return {'status': 'READ_ONLY', 'execution_enabled': False,
                         'get': sorted(READS), 'post': sorted(POSTS),
@@ -51,13 +104,17 @@ class ReadOnlyEngine(engine.Engine):
                         'login_secret_configured': self.login_secret_configured,
                         'native_readiness': 'NOT_CHECKED'}
             return super().dispatch(method, path, payload)
-        if method == 'POST' and path == REFRESH:
-            if (type(payload) is not dict or payload.keys() != POSTS[REFRESH]
+        if method == 'POST' and path == LOGIN:
+            if type(payload) is not dict or payload:
+                raise engine.ServiceError('INVALID_REQUEST', 400)
+            return self._run_operator(lambda backend, budget: backend.login(budget=budget))
+        if method == 'POST' and path in (HOLDINGS_REFRESH, REFRESH):
+            if (type(payload) is not dict or payload.keys() != REFRESH_FIELDS
                     or any(type(payload[k]) is not str or re.fullmatch(pattern, payload[k]) is None
                            for k, pattern in (('request_id', r'[A-Za-z0-9_.:-]{1,128}'),
                                               ('control_fingerprint', r'[0-9a-f]{64}')))):
                 raise engine.ServiceError('INVALID_REQUEST', 400)
-            return self._refresh(payload)
+            return self._run_refresh(lambda budget: self._get_backend().holdings_refresh.dispatch(payload, budget=budget))
         if method == 'POST' and path == OPERATOR:
             return super().dispatch(method, path, payload)
         raise engine.ServiceError('NOT_FOUND', 404)

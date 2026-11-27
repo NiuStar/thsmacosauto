@@ -19,6 +19,8 @@ from urllib.parse import parse_qsl, urlsplit
 
 MAX_BODY = 32768
 MAX_DEPTH = 32
+REQUEST_ID_PATTERN = r'[A-Za-z0-9_.:-]{1,128}'
+ORDER_STATUS_QUERY = {'/v1/real/orders/status': ('client_order_id', REQUEST_ID_PATTERN)}
 GET_PATHS = frozenset({"/v1/health", "/v1/capabilities", "/v1/real/native-current-panel",
                        "/v1/real/positions", "/v1/real/orders", "/v1/real/trades",
                        "/v1/real/positions-scope-diagnostic", "/v1/real/positions-panel",
@@ -71,6 +73,7 @@ for _code in ("ENGINE_FENCED", "AUTOMATIC_STOPPED", "INVALID_PRESS_PERMIT", "STA
               "FORM_SCOPE_MISMATCH", "STALE_FORM", "TRUSTED_SIGNAL_PROVIDER_UNAVAILABLE",
               "TRUSTED_SIGNAL_INVALID", "STALE_SIGNAL", "SHAREHOLDER_SCOPE_MISMATCH",
               "SIGNAL_DAY_MISMATCH", "INSUFFICIENT_AVAILABLE_CASH", "ACCOUNT_UNKNOWN", "REQUEST_ID_CONFLICT",
+              "CANCEL_TARGET_MISMATCH",
               "BLOCKED_PROFILE_UNQUALIFIED", "NATIVE_TRADE_DISABLED", "NAVIGATION_DISABLED",
               "MACOS_REQUIRED", "AX_NOT_TRUSTED", "FRAMEWORK_SOURCE_MISMATCH", "APP_IDENTITY_MISMATCH",
               "APP_COUNT_MISMATCH", "APP_EXECUTABLE_MISMATCH", "PROCESS_OWNER_UNVERIFIED",
@@ -117,6 +120,20 @@ RESTORE_CONFIRMATION_PENDING RESTORE_FORM_POLICY_DISABLED RESTORE_NAVIGATION_DIS
 SELL_RULE_NOT_CONFIGURED SHAREHOLDER_SCOPE_MISMATCH SHAREHOLDER_SCOPE_UNPROVEN_EMPTY_POSITIONS
 STALE_BASELINE STALE_READ_CAPTURE UNSUPPORTED_READ_KIND'''.split())
 NATIVE_ERRORS={code:(503, 'Native observation is unavailable.') for code in NATIVE_ERROR_CODES}
+
+def single_query(query, key, pattern):
+    """Accept one exact query parameter and only the specified value grammar."""
+    try:
+        if re.search(r'%(?![0-9A-Fa-f]{2})', query):
+            raise ValueError
+        fields = parse_qsl(query, keep_blank_values=True, strict_parsing=True,
+                           encoding='utf-8', errors='strict', max_num_fields=1)
+        if len(fields) != 1 or fields[0][0] != key or not re.fullmatch(pattern, fields[0][1]):
+            raise ValueError
+        return {key: fields[0][1]}
+    except (ValueError, UnicodeError):
+        raise Rejected('BAD_REQUEST') from None
+
 
 class Rejected(Exception):
     def __init__(self, code):
@@ -433,6 +450,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     get_paths = GET_PATHS
     post_keys = POST_KEYS
+    get_queries = ORDER_STATUS_QUERY
 
     def _route(self):
         if self.command not in ("GET", "POST"):
@@ -452,20 +470,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         if (self.command == "GET") != (path in self.get_paths):
             raise Rejected("METHOD_NOT_ALLOWED")
         query_payload = None
-        if path == "/v1/real/orders/status":
-            try:
-                if re.search(r"%(?![0-9A-Fa-f]{2})", parsed.query):
-                    raise ValueError
-                values = parse_qsl(parsed.query, keep_blank_values=True, strict_parsing=True,
-                                   encoding="utf-8", errors="strict", max_num_fields=1)
-                if len(values) != 1 or values[0][0] != "client_order_id":
-                    raise ValueError
-                identifier = values[0][1]
-                if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", identifier):
-                    raise ValueError
-                query_payload = {"client_order_id": identifier}
-            except (ValueError, UnicodeError):
-                raise Rejected("BAD_REQUEST") from None
+        if path in self.get_queries:
+            query_payload = single_query(parsed.query, *self.get_queries[path])
         elif "?" in target:
             raise Rejected("BAD_REQUEST")
         return path, query_payload
@@ -518,10 +524,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             body = self._body(path)
             self._read_timer.cancel()
             self._read_timer.join()
-            # Preserve the established Engine status-query seam after strict validation.
+            # Every admitted query has a fixed key and a delimiter-free value.
             dispatch_path = path
             if query is not None:
-                dispatch_path += "?client_order_id=" + query["client_order_id"]
+                key, value = next(iter(query.items()))
+                dispatch_path += f'?{key}={value}'
             payload = None if self.command == "GET" else body
             # Only the Engine-owned, call-scoped seam supplies correlation. Never
             # trust arbitrary exception attributes, including ServiceError IDs.

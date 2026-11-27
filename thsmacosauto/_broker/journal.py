@@ -261,6 +261,15 @@ class Journal:
         with self._lock:
             return self.conn.execute("SELECT 1 FROM requests WHERE status='UNKNOWN' LIMIT 1").fetchone() is not None
 
+    def status_counts(self):
+        with self._lock:
+            total, unresolved, in_flight = self.conn.execute('''SELECT COUNT(*),
+                COUNT(CASE WHEN status='UNKNOWN' THEN 1 END),
+                COUNT(CASE WHEN status IN ('CLAIMED','PREPARED','SUBMITTING','CONFIRMING') THEN 1 END)
+                FROM requests''').fetchone()
+        return dict(request_count=total, unresolved_count=unresolved, in_flight_count=in_flight,
+                    new_requests_blocked_by_unknown=unresolved > 0)
+
     def reservations(self):
         from decimal import Decimal
         with self._lock:

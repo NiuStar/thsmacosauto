@@ -24,10 +24,12 @@ class NativeHTTP(unittest.TestCase):
         self.ax = self.runtime.backend
         # Use the original single-market fixture mapping for refresh qualification.
         self.ax.add('refresh', 'content', AXRole='AXButton', AXDescription='刷新持仓', AXEnabled=True)
-        def factory(_cfg, *, gui_owner):
+        def factory(cfg, *, gui_owner):
             return PymacautoBackend(dict(account_scope='fixture-account',
-                shareholder_scopes={'上海':'SYNTHETIC-HOLDER'}, allow_navigation=True, allow_trade=False),
+                shareholder_scopes={'上海':'SYNTHETIC-HOLDER'}, allow_navigation=True, allow_trade=False,
+                **{k: cfg[k] for k in ('login_secret_file',) if k in cfg}),
                 gui_owner=gui_owner, runtime_factory=lambda:self.runtime)
+        self.factory = factory
         test_api.API.start(self, factory)
 
     def discover(self):
@@ -45,6 +47,97 @@ class NativeHTTP(unittest.TestCase):
         self.assertEqual(self.call('POST', api.REFRESH, body)[:2], first)
         self.assertEqual(self.call('GET', '/v1/real/holdings-refresh-status')[:2], first)
         self.assertEqual(self.ax.effects, [('press','refresh')])
+
+    def test_new_refresh_routes_share_token_and_receipt_with_legacy(self):
+        status, control, _ = self.call('GET', '/v1/holdings/refresh/controls')
+        self.assertEqual(status, 200, control)
+        self.assertEqual(control['status'], 'REFRESH_CONTROL_QUALIFIED')
+        self.assertEqual(self.ax.effects, [])
+        body = json.dumps({'request_id': 'feature-test', 'control_fingerprint': control['control_fingerprint']})
+        first = self.call('POST', '/v1/holdings/refresh', body)[:2]
+        self.assertEqual((first[0], first[1]['status']), (200, 'REFRESH_DISPATCH_ACKNOWLEDGED'))
+        self.assertEqual(first[1]['query_completion'], 'UNVERIFIED')
+        self.assertEqual(self.call('POST', api.REFRESH, body)[:2], first)
+        calls = len(self.ax.calls)
+        self.assertEqual(self.call('GET', '/v1/holdings/refresh/status')[:2], first)
+        self.assertEqual(self.call('GET', '/v1/real/holdings-refresh-status')[:2], first)
+        self.assertEqual(len(self.ax.calls), calls)
+        self.assertEqual(self.ax.effects, [('press', 'refresh')])
+
+    def test_login_observation_and_already_logged_in_never_read_secret(self):
+        with patch('thsmacosauto._broker.login_auto.read_password', side_effect=AssertionError('secret read')) as reader:
+            status, observation, _ = self.call('GET', '/v1/login/status')
+            self.assertEqual((status, observation['status']), (200, 'ALREADY_LOGGED_IN'))
+            result = self.call('POST', '/v1/login', '{}')[:2]
+            self.assertEqual((result[0], result[1].get('status')), (200, 'ALREADY_LOGGED_IN'), result)
+            reader.assert_not_called()
+        self.assertEqual(self.ax.effects, [])
+
+    def test_login_status_does_not_open_logged_out_form(self):
+        self.ax.nodes['window']['AXChildren'].remove('broker')
+        self.ax.add('login-entry', AXRole='AXButton', AXTitle='立即登录', AXEnabled=True)
+        with patch('thsmacosauto._broker.login_auto.read_password', side_effect=AssertionError('secret read')) as reader:
+            code, result, _ = self.call('GET', '/v1/login/status')
+            self.assertEqual((code, result.get('already_logged_in'), result.get('login_control_count')),
+                             (200, False, 1), result)
+            self.assertEqual(self.ax.effects, [])
+            publish = self.ax.perform
+            def open_sheet(ref, action):
+                publish(ref, action)
+                self.ax.add('login-sheet', AXRole='AXSheet', AXIdentifier='_NS:259')
+                self.ax.add('secure', 'login-sheet', AXRole='AXTextField', AXSubrole='AXSecureTextField')
+            self.ax.perform = open_sheet
+            code, result, _ = self.call('POST', api.OPERATOR, '{"action":"login-open"}')
+            self.assertEqual((code, result.get('status')), (200, 'LOGIN_DIALOG_OPENED'), result)
+            reader.assert_not_called()
+        self.assertEqual(self.ax.effects, [('press', 'login-entry')])
+
+    def test_login_command_switches_opens_and_submits_once(self):
+        root = Path(self.config['token_file']).parent
+        secret = root / 'login.json'
+        secret.touch(mode=0o600)
+        secret.write_text('{"schema":"THS_LOGIN_SECRET_V1","password":"SYNTHETIC-PRIVATE"}')
+        self.service.engine._factory = lambda: self.factory({'login_secret_file': str(secret)},
+                                                             gui_owner=self.service.lease)
+        ax = self.ax
+        original = ax.nodes['window']['AXChildren'][:]
+        ax.nodes['window']['AXChildren'] = []
+        ax.add('trade-entry', AXRole='AXButton', AXTitle='交易', AXEnabled=True)
+        ax.add('entry', AXRole='AXButton', AXTitle='立即登录', AXEnabled=True)
+        ax.add('auth', AXRole='AXSheet', AXIdentifier='_NS:259', AXParent='window',
+               AXPosition={'x':0,'y':0}, AXSize={'width':453,'height':292})
+        roles = {**dict.fromkeys((2, 4, 6, 8, 13), 'AXComboBox'), 11:'AXTextField', 15:'AXTextField',
+                 **dict.fromkeys((16,22,23), 'AXButton')}
+        bounds = {10:(217,139,52,25), 11:(277,139,154,25), 14:(217,202,52,25),
+                  15:(277,202,90,25), 16:(372,203,60,24), 22:(277,240,154,32), 23:(237,240,42,32),
+                  **{i:(374+10*(i-17),203,8,24) for i in range(17,22)}}
+        for i in range(29):
+            x,y,w,h = bounds.get(i,(0,0,1,1))
+            ax.add(f'field-{i}', 'auth', AXRole=roles.get(i,'AXStaticText'), AXParent='auth', AXEnabled=True,
+                   AXPosition={'x':x,'y':y}, AXSize={'width':w,'height':h})
+        ax.nodes['field-11']['AXSubrole'] = 'AXSecureTextField'
+        for i, label in {10:'交易密码', 14:'验证码', **dict(zip(range(17,22),'48261'))}.items():
+            ax.nodes[f'field-{i}']['AXValue'] = label
+        ax.nodes['field-22']['AXTitle'] = '登录'
+        ax.nodes['field-23']['AXTitle'] = '取消'
+        ax.nodes['window']['AXChildren'] = ['trade-entry']
+        ax.is_settable = lambda ref, attr: (ref, attr) in {('field-11','AXValue'), ('field-15','AXValue')}
+        ax.set = lambda ref, attr, value: ax.effects.append(('set', ref))
+        next_children = {'trade-entry':['entry'], 'entry':['auth'], 'field-22':original}
+        def perform(ref, action):
+            ax.effects.append(('press', ref))
+            ax.nodes['window']['AXChildren'] = next_children[ref]
+        ax.perform = perform
+        self.assertFalse(self.call('GET', '/v1/login/status')[1]['already_logged_in'])
+        self.assertEqual(ax.effects, [])
+        code, result, _ = self.call('POST', '/v1/login', '{}')
+        self.assertEqual((code, result.get('status')), (200, 'LOGIN_VERIFIED'), result)
+        self.assertEqual(self.call('GET', '/v1/login/status')[1]['status'], 'ALREADY_LOGGED_IN')
+        self.assertEqual(self.call('POST', api.OPERATOR, '{"action":"ensure-login"}')[1]['status'], 'ALREADY_LOGGED_IN')
+        self.assertEqual(ax.effects, [('press','trade-entry'), ('press','entry'), ('set','field-11'),
+                                      ('set','field-15'), ('press','field-22')])
+        self.assertNotIn('SYNTHETIC-PRIVATE', json.dumps(result))
+        self.assertNotIn('48261', json.dumps(result))
 
     def test_uncertain_refresh_retains_receipt_without_retry(self):
         body = self.discover()
@@ -70,15 +163,15 @@ class NativeHTTP(unittest.TestCase):
 
     def test_token_expiring_during_revalidation_is_never_pressed(self):
         body = self.discover()
-        backend = self.service.engine._backend
-        observe = backend._refresh_observe
+        refresh = self.service.engine._backend.holdings_refresh
+        observe = refresh._refresh_observe
 
         def expire_after_observation():
             proof = observe()
-            backend._refresh_discovered_ns -= 31_000_000_000
+            refresh._refresh_discovered_ns -= 31_000_000_000
             return proof
 
-        with patch.object(backend, '_refresh_observe', expire_after_observation):
+        with patch.object(refresh, '_refresh_observe', expire_after_observation):
             self.assertEqual(self.call('POST', api.REFRESH, body)[1]['code'], 'REFRESH_TOKEN_INVALID')
         self.assertEqual(self.call('GET', '/v1/real/holdings-refresh-status')[1]['status'], 'REFRESH_BLOCKED')
         self.assertEqual(self.ax.effects, [])
@@ -106,6 +199,11 @@ class NativeHTTP(unittest.TestCase):
         self.assertEqual(data['upstream_freshness'], 'UNVERIFIED')
         self.assertFalse(data['positions_complete'])
         self.assertNotIn('SYNTHETIC-HOLDER', json.dumps(data))
+        self.ax.nodes['cell0_1']['AXValue'] = '220'
+        status, current, _ = self.call('GET', '/v1/holdings')
+        self.assertEqual(status, 200, current)
+        self.assertEqual((current['positions'][0]['total'], current['positions'][0]['available']), (220, 0))
+        self.assertEqual(self.call('GET', '/v1/real/positions')[1]['code'], 'FIXED_SCOPE_INCOMPLETE_OBSERVATION')
         self.assertEqual(self.ax.effects, [])
 
 class CLI(unittest.TestCase):

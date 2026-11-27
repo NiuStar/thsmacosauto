@@ -32,6 +32,8 @@ class SyntheticAX:
         }[page]
         if page == '委托':
             values = getattr(self, 'order_rows', [])
+        if page == '成交':
+            values = getattr(self, 'trade_rows', values)
         ident = {'持仓': '1537', '委托': '1539', '成交': '1538'}[page]
         self.nodes['table'] = {'AXRole': 'AXTable', 'AXIdentifier': ident, 'AXColumns': [], 'AXRows': []}
         for j, header in enumerate(headers):

@@ -21,7 +21,9 @@ from . import fill_evidence as fills
 from . import readonly_budget as rb
 
 
-from .engine import ServiceError
+from .native_errors import NativeError, _block
+from . import holdings, login_status
+from .holdings_refresh import HoldingsRefresh
 
 
 _OWNER_FAILURE_CODES = frozenset({
@@ -37,14 +39,6 @@ def _owner_failure(error):
         code = 'GUI_OWNER_PROOF_FAILED'
     return NativeError(code)
 
-
-class NativeError(ServiceError):
-    def __init__(self, code):
-        super().__init__(code, 503)
-
-
-def _block(code):
-    raise NativeError(code)
 
 
 def _profile():
@@ -291,8 +285,9 @@ class PymacautoBackend:
         self._form_original = None
         self._used_ids = set()
         self._trade_page_claimed = False
-        self._refresh_claimed = False
-        self._refresh_request = self._refresh_receipt = self._refresh_proof = self._refresh_token = None
+        self._cancel_context = None
+        self._cancel_stage = 'READY'
+        self.holdings_refresh = HoldingsRefresh(self)
         from .gui_ownership import GUIOwnerLease
         if gui_owner is not None and type(gui_owner) is not GUIOwnerLease:
             _block('GUI_OWNER_NOT_HELD')
@@ -784,423 +779,57 @@ class PymacautoBackend:
         except Unrecognized:return False
         return not modals
 
+    def _press_operator_control(self, ref):
+        # Called inside the existing owned-effect boundary.
+        if not isinstance(self._runtime.backend, _BudgetNativeBackend):
+            rb.mark_rpc()
+        return self._runtime.backend.perform(ref, 'AXPress')
+
     def _login_entry(self, action, budget, *, narrow=False, binding=None):
-        """Same-owner one-shot entry only. Editable nodes are role-only leaves."""
-        import math
-        import re
-        from collections import deque
-        self._owner_proof()
-        if action=='login-open':
-            from .disconnect_warning import before_open
-            refusal=before_open(self,budget,explicit_navigation=True)
-            if refusal is not None:return refusal
-        app,session,identity=self._connect()
-        root=session.scope().root
-        def assert_binding():
-            if binding is None:return
-            key=app.backend.key
-            if ((identity,key(app._root),key(root))!=binding
-                    or key(app.backend.root(app.pid))!=binding[1]):
-                from .login_auto import LoginFailure
-                raise LoginFailure('LOGIN_TARGET_CHANGED')
-        assert_binding()
-        entry_front=self._owned_effect(self._runtime.front) if action=='login-open' else None
-        fixed=frozenset(('立即登录','免费开户','登录','自动登录','记住密码','验证码','账号','密码','交易密码','资金账号','取消','确定','天府证券','持仓','委托','成交','交易'))
-        containers=frozenset(('AXWindow','AXSheet','AXDialog','AXGroup','AXSplitGroup','AXScrollArea','AXTabGroup','AXToolbar','AXList'))
-        def geometry(ref):
-            p=self._get(ref,'AXPosition');s=self._get(ref,'AXSize')
-            if not isinstance(p,dict) or not isinstance(s,dict):return None
-            values=[p.get('x'),p.get('y'),s.get('width'),s.get('height')]
-            if any(type(v) not in (int,float) or not math.isfinite(v) for v in values):return None
-            return dict(zip(('x','y','width','height'),values))
-        def identifier(ref):
-            value=self._get(ref,'AXIdentifier')
-            return value if type(value) is str and re.fullmatch(r'_NS:[0-9]{1,5}',value) else None
-        from .login_result import is_modal
-        def sample(*, after_press=False):
-            windows=self._get(app._root,'AXWindows') or []
-            if not isinstance(windows,(list,tuple)) or len(windows)>12:_block('AX_TRAVERSAL_LIMIT')
-            window_keys=[app.backend.key(w) for w in windows]
-            root_key=app.backend.key(root)
-            if len(set(window_keys))!=len(window_keys) or root_key not in window_keys:_block('NATIVE_CONTINUITY_CHANGED')
-            root_index=window_keys.index(root_key)
-            queue=deque((w,0,[i],None,False) for i,w in enumerate(windows))
-            seen={};entries=[];forms=[];counts={label:0 for label in fixed};modal=False;unsafe=False
-            while queue:
-                ref,depth,path,form,in_modal=queue.popleft();key=app.backend.key(ref)
-                if depth and key in window_keys and key!=window_keys[path[0]]:continue
-                prior_window=seen.get(key)
-                if prior_window is not None:
-                    if prior_window!=path[0]:unsafe=True
-                    continue
-                seen[key]=path[0]
-                if len(seen)>app.max_nodes:_block('AX_TRAVERSAL_LIMIT')
-                role=self._get(ref,'AXRole');sub=self._get(ref,'AXSubrole')
-                if depth and role=='AXWindow':continue
-                in_root=path[0]==root_index
-                # No values, labels, identifiers, geometry or descendants of fields.
-                if sub=='AXSecureTextField' or role in ('AXSecureTextField','AXTextField','AXTextArea','AXComboBox'):
-                    if form is not None:
-                        form['secure_field_count' if sub=='AXSecureTextField' or role=='AXSecureTextField' else 'field_count']+=1
-                    continue
-                if role in ('AXWindow','AXSheet','AXDialog'):
-                    form={'role':role,'path':path,'identifier':identifier(ref),'field_count':0,'secure_field_count':0,'labels':[],'signature':False}
-                    forms.append(form)
-                    if is_modal(self._get,ref,role,sub):modal=True;in_modal=True
-                if role in ('AXButton','AXStaticText','AXCheckBox'):
-                    attrs=('AXTitle','AXDescription','AXHelp','AXValue')
-                    passive_modal=(narrow or action in ('login-status','login-inspect')) and in_modal
-                    values=[self._get(ref,a) if not (passive_modal and (role=='AXStaticText' and path[-1] not in (10,14) or a in ('AXDescription','AXHelp') or a=='AXValue' and not (role=='AXStaticText' and path[-1] in (10,14)))) else None for a in attrs]
-                    known=sorted({v for v in values if type(v) is str and v in fixed})
-                    if in_root:
-                        for label in known:
-                            if label!='天府证券' or (role=='AXStaticText' and not in_modal):counts[label]+=1
-                    if any(marker in v for v in values if type(v) is str for marker in self.profile['forbidden_text']):unsafe=True
-                    if form is not None:form['labels']=sorted(set(form['labels'])|set(known))
-                    if in_root and not after_press and role=='AXButton' and '立即登录' in known:
-                        actions=app.backend.actions(ref) or []
-                        facts={'role':role,'identifier':identifier(ref),'labels':known,'exact_attributes':[a for a,v in zip(attrs,values) if type(v) is str and v=='立即登录'],
-                            'enabled':self._get(ref,'AXEnabled') is True,'actions':['AXPress'] if 'AXPress' in actions else [],
-                            'path':path,'geometry':geometry(ref),'locator':'EXACT_NATIVE_LABEL','in_modal':in_modal}
-                        entries.append((ref,facts))
-                if role not in containers:continue
-                if role=='AXList' and depth!=1:continue
-                children=self._get(ref,'AXChildren') or []
-                if not isinstance(children,(list,tuple)) or len(children)>app.max_nodes:_block('AX_TRAVERSAL_LIMIT')
-                children=list(children)
-                for relation in (('AXSheets',) if role in ('AXWindow','AXSheet') else ()):
-                    extra=self._get(ref,relation) or []
-                    if not isinstance(extra,(list,tuple)) or len(extra)>12:_block('AX_TRAVERSAL_LIMIT')
-                    children.extend(extra)
-                if depth>=app.max_depth and children:_block('AX_TRAVERSAL_LIMIT')
-                queue.extend((child,depth+1,path+[i],form,in_modal) for i,child in enumerate(children))
-            for form in forms:
-                form['signature']=bool(form['secure_field_count'] or (form['field_count'] and '登录' in form['labels'] and set(form['labels']) & {'账号','资金账号','密码','交易密码','验证码'}))
-            # Parent-confirmed paired layout, never a guessed index/pixel click.
-            if not after_press and not entries and not modal:
-                children=self._get(root,'AXChildren') or []
-                origin=geometry(root);pair=[]
-                if isinstance(children,(list,tuple)) and len(children)>15 and origin is not None:
-                    for index,ident,y in ((13,'_NS:14',126),(15,'_NS:43',231)):
-                        ref=children[index]
-                        if self._get(ref,'AXRole')!='AXButton' or self._get(ref,'AXSubrole')=='AXSecureTextField':break
-                        g=geometry(ref)
-                        if identifier(ref)!=ident or g is None:break
-                        if any(abs(a-b)>2 for a,b in zip((g['x']-origin['x'],g['y']-origin['y'],g['width'],g['height']),(73,y,168,28))):break
-                        pair.append((ref,g))
-                    if len(pair)==2 and app.backend.key(pair[0][0])!=app.backend.key(pair[1][0]):
-                        ref,g=pair[1];actions=app.backend.actions(ref) or []
-                        entries.append((ref,{'role':'AXButton','identifier':'_NS:43','labels':['立即登录'],'exact_attributes':[],
-                            'enabled':self._get(ref,'AXEnabled') is True,'actions':['AXPress'] if 'AXPress' in actions else [],
-                            'path':[next(i for i,w in enumerate(windows) if app.backend.key(w)==app.backend.key(root)),15],
-                            'geometry':g,'locator':'USER_CONFIRMED_LOGIN_CHILD_15','in_modal':False,'associated_label':True,'pair_geometry':[g for _,g in pair]}))
-            return entries,forms,counts,modal,unsafe,root_index
-        def logged_in(forms,counts,modal,unsafe):
-            if counts['天府证券']!=1 or modal or unsafe or any(f['signature'] for f in forms):return False
-            if app.backend.key(session.scope().root)!=app.backend.key(root):return False
-            try:
-                return (session.detect()['page'] in ('持仓','委托','成交')
-                        and app.backend.key(session.scope().root)==app.backend.key(root))
-            except Exception as exc:
-                from .._ax.errors import ElementNotFound,AmbiguousMatch
-                if not isinstance(exc,(ElementNotFound,AmbiguousMatch)):raise
-                return False
-        entries,forms,counts,modal,unsafe,root_index=sample()
-        logged=action=='login-open' and logged_in(forms,counts,modal,unsafe)
-        result={'status':'LOGIN_ENTRY_INSPECTED','press_attempted':False,'execution_enabled':False,
-            'login_control_count':len(entries),'login_controls':[f for _,f in entries],
-            'auth_forms':forms,'known_labels':counts,'already_logged_in':logged,
-            'authentication_unsupported':['SECRET_READ','FIELD_FILL','LOGIN_SUBMIT','AUTO_RESTORE','PERSISTENT_MONITOR']}
-        if action in ('login-status','login-inspect'):
-            from .login_result import observe
-            def current_logged():
-                _,current_forms,current_counts,current_modal,current_unsafe,_=sample()
-                return logged_in(current_forms,current_counts,current_modal,current_unsafe)
-            outcome=observe(self,budget,app,session,identity,root,current_logged,assert_binding=assert_binding)
-            if action=='login-inspect' or outcome['status'] in ('LOGIN_COMMUNICATION_ERROR','ALREADY_LOGGED_IN','LOGIN_RESULT_UNRECOGNIZED'):
-                return {**result,**outcome,'already_logged_in':outcome['authenticated']}
-            return {**result,'already_logged_in':False}
-        if logged:return {**result,'status':'ALREADY_LOGGED_IN'}
-        if getattr(self,'_login_entry_claimed',False):return {**result,'status':'LOGIN_ALREADY_CLAIMED'}
-        if any(f['signature'] for f in forms):return {**result,'status':'LOGIN_FORM_ALREADY_PRESENT'}
-        if modal or unsafe or counts['天府证券']:return {**result,'status':'LOGIN_ENTRY_BLOCKED'}
-        if not self.config.get('allow_navigation',False):return {**result,'status':'NAVIGATION_DISABLED'}
-        if len(entries)!=1:return {**result,'status':'LOGIN_CONTROL_NOT_UNIQUE'}
-        ref,facts=entries[0]
-        if not facts['enabled'] or facts['actions']!=['AXPress'] or facts['in_modal']:return {**result,'status':'LOGIN_CONTROL_UNSAFE'}
-        if self._owned_effect(self._runtime.app_identity)!=identity or app.backend.key(session.scope().root)!=app.backend.key(root):_block('NATIVE_CONTINUITY_CHANGED')
-        fresh=sample()
-        if fresh[1:]!=(forms,counts,modal,unsafe,root_index) or len(fresh[0])!=1 or app.backend.key(fresh[0][0][0])!=app.backend.key(ref) or fresh[0][0][1]!=facts:
-            return {**result,'status':'LOGIN_ENTRY_BLOCKED'}
-        if self._owned_effect(self._runtime.app_identity)!=identity or app.backend.key(session.scope().root)!=app.backend.key(root):_block('NATIVE_CONTINUITY_CHANGED')
-        if self._owned_effect(self._runtime.front)!=entry_front:return {**result,'status':'LOGIN_TARGET_CHANGED'}
-        if not self._navigation_modal_clear(app,session,identity,root,entry_front):return {**result,'status':'LOGIN_ENTRY_BLOCKED'}
-        self._owner_proof();budget.check()
-        self._login_entry_claimed=True
-        result.update(status='LOGIN_ENTRY_UNCONFIRMED',press_attempted=True)
-        budget.event('LOGIN_ENTRY_CLAIMED')
-        try:
-            def dispatch():
-                if not isinstance(self._runtime.backend,_BudgetNativeBackend):rb.mark_rpc()
-                return self._runtime.backend.perform(ref,'AXPress')
-            self._owned_effect(dispatch)
-            if self._owned_effect(self._runtime.app_identity)!=identity:return result
-            _,after,_,_,after_unsafe,after_root_index=sample(after_press=True)
-            result['auth_forms']=after
-            if not after_unsafe and any(f['signature'] and f['path'][0]==after_root_index for f in after):
-                result['status']='LOGIN_DIALOG_OPENED'
-                self._login_entry_claimed=False
-        except Exception:
-            return result
-        return result
+        # Internal compatibility for the existing login recovery/ledger flows.
+        if action == 'login-open':
+            from .login_entry import open_dialog
+            return open_dialog(self, budget, narrow=narrow, binding=binding)
+        return login_status.status(self, budget, inspect=action == 'login-inspect', narrow=narrow, binding=binding)
 
-    def trade_page(self, action, *, budget):
-        """Operator-only navigation, never a read kind or an order capability.
-
-        Fresh exact AX labels; no coordinates, keys, focus or cached selectors.
-        Uncertain navigation retains its claim. Verified navigation releases it.
-        Explicit ensure-login delegates credential writes to the narrow adapter.
-        """
+    def _require_readonly_operator(self, budget):
         rb.require(budget)
         self._thread()
-        if not budget.read_only or action not in ('login-status','inspect','switch','login-inspect','login-open','ensure-login','retry-login','fresh-login'):
+        if not budget.read_only:
             _block('READ_BUDGET_UNSUPPORTED')
         if self._original is not None or self._attempt is not None:
             _block('NATIVE_SESSION_UNCERTAIN')
+
+    def login_status(self, *, budget, inspect=False):
+        self._require_readonly_operator(budget)
+        return login_status.status(self, budget, inspect=inspect)
+
+    def login(self, *, budget):
+        self._require_readonly_operator(budget)
+        from .login_auto import ensure
+        return ensure(self, budget)
+
+    def trade_page(self, action, *, budget):
+        """Compatibility dispatcher for the original operator action API."""
+        if action not in ('login-status','inspect','switch','login-inspect','login-open','ensure-login','retry-login','fresh-login'):
+            rb.require(budget)
+            self._thread()
+            _block('READ_BUDGET_UNSUPPORTED')
+        if action == 'ensure-login':
+            return self.login(budget=budget)
+        if action in ('login-status','login-inspect'):
+            return self.login_status(budget=budget, inspect=action == 'login-inspect')
+        self._require_readonly_operator(budget)
         if action=='retry-login':
             from .login_retry import retry
             return retry(self,budget)
         if action=='fresh-login':
             from .login_retry import fresh_login
             return fresh_login(self,budget)
-        if action=='ensure-login':
-            from .login_auto import ensure
-            return ensure(self,budget)
-        if action in ('login-status','login-inspect','login-open'):
+        if action == 'login-open':
             return self._login_entry(action,budget)
-        if action == 'switch' and getattr(self,'_trade_page_claimed',False):
-            return {'status':'SWITCH_ALREADY_CLAIMED','press_attempted':False,'execution_enabled':False}
-        self._owner_proof()
-        app, session, identity = self._connect()
-        root = session.scope().root
-        switch_front=self._owned_effect(self._runtime.front) if action=='switch' else None
-        trade_labels = frozenset(('交易','委托交易','股票交易','交易委托'))
-        labels = trade_labels | frozenset(('自选','行情','资讯','发现','首页','问财','资金','银证','持仓','买入','卖出','委托','成交','天府证券'))
-        roles = frozenset(('AXButton','AXRadioButton','AXCheckBox','AXTab'))
-        path_roles=roles | frozenset(('AXWindow','AXGroup','AXSplitGroup','AXScrollArea','AXTabGroup','AXToolbar','AXTable','AXList','AXOutline','AXStaticText','AXImage'))
-        def safe_identifier(ref):
-            import re
-            ident=self._get(ref,'AXIdentifier')
-            return ident if type(ident) is str and re.fullmatch(r'_NS:[0-9]{1,5}',ident) else None
-        # References stay private to this call. All outbound labels are literals.
-        def discover():
-            from collections import deque
-            queue = deque([(root,0,())])
-            seen=set();controls=[];candidates=[];counts={label:0 for label in labels};unsafe=False;hints=[];sidebar_nodes=[]
-            pruned=[]
-            while queue:
-                ref,depth,path=queue.popleft()
-                key=app.backend.key(ref)
-                if key in seen:continue
-                seen.add(key)
-                if len(seen)>app.max_nodes:_block('AX_TRAVERSAL_LIMIT')
-                role=self._get(ref,'AXRole');subrole=self._get(ref,'AXSubrole')
-                path=path+(role if role in path_roles else 'AXOther',)
-                if subrole=='AXSecureTextField' or role in ('AXSecureTextField','AXTextField','AXTextArea','AXMenu','AXMenuBar','AXSheet','AXDialog'):
-                    if role in ('AXSheet','AXDialog'):unsafe=True
-                    continue
-                if action=='inspect' and path[:2]==('AXWindow','AXList'):
-                    words=[self._get(ref,a) for a in ('AXTitle','AXDescription','AXHelp')]
-                    if role in ('AXStaticText','AXButton'):words.append(self._get(ref,'AXValue'))
-                    sidebar_nodes.append({'role':role if role in path_roles else 'AXOther',
-                        'identifier':safe_identifier(ref),'depth':depth,
-                        'labels':sorted({w for w in words if type(w) is str and w in labels}),
-                        'press':('AXPress' in (app.backend.actions(ref) or [])) if role in roles else False})
-                if role=='AXStaticText':
-                    value=self._get(ref,'AXValue')
-                    if isinstance(value,str):
-                        if value in counts:counts[value]+=1
-                        if any(marker in value for marker in self.profile['forbidden_text']):unsafe=True
-                if role in roles:
-                    attrs=('AXTitle','AXDescription','AXHelp')
-                    if role=='AXButton':attrs+=('AXValue',)
-                    values=[self._get(ref,attr) for attr in attrs]
-                    # An explicit title relation is owned by this control even
-                    # when the title element is not an AXChildren member.
-                    title_ref=self._get(ref,'AXTitleUIElement')
-                    if title_ref is not None:
-                        title_role=self._get(title_ref,'AXRole')
-                        title_subrole=self._get(title_ref,'AXSubrole')
-                        if title_subrole!='AXSecureTextField' and title_role=='AXStaticText':
-                            values.extend(self._get(title_ref,a) for a in ('AXValue','AXTitle'))
-                    # Only immediate, nonsecure label/image children belonging
-                    # to this action control may contribute navigation wording.
-                    children=self._get(ref,'AXChildren') or []
-                    if not isinstance(children,(list,tuple)) or len(children)>app.max_nodes:
-                        _block('AX_TRAVERSAL_LIMIT')
-                    if depth>=app.max_depth and children:_block('AX_TRAVERSAL_LIMIT')
-                    for child in children:
-                        child_role=self._get(child,'AXRole')
-                        child_subrole=self._get(child,'AXSubrole')
-                        if child_subrole=='AXSecureTextField' or child_role not in ('AXStaticText','AXImage'):
-                            continue
-                        parent=self._get(child,'AXParent')
-                        if parent is None or app.backend.key(parent)!=key:continue
-                        child_attrs=('AXValue','AXTitle') if child_role=='AXStaticText' else ('AXDescription','AXTitle','AXHelp')
-                        values.extend(self._get(child,attr) for attr in child_attrs)
-                    known=sorted({v for v in values if type(v) is str and v in labels})
-                    # Export only fixed labels, never arbitrary native wording.
-                    hints.extend({'role':role,'attribute':attr,'text':value}
-                        for attr,value in zip(attrs,values)
-                        if type(value) is str and value in trade_labels)
-                    if any(any(marker in v for marker in self.profile['forbidden_text']) for v in values if isinstance(v,str)):unsafe=True
-                    # Conflicting descriptions never grant a trade navigation.
-                    enabled=self._get(ref,'AXEnabled') is True
-                    actions=app.backend.actions(ref)
-                    press=isinstance(actions,(list,tuple)) and 'AXPress' in actions
-                    selected=self._get(ref,'AXValue') if role in ('AXRadioButton','AXCheckBox','AXTab') else None
-                    selected=bool(selected) if type(selected) in (bool,int) and selected in (0,1) else None
-                    # Native identifiers may contain account values. Only the
-                    # known NS numeric identifier grammar crosses this boundary.
-                    ident=safe_identifier(ref)
-                    facts={'role':role,'identifier':ident,'labels':known,'enabled':enabled,
-                           'actions':['AXPress'] if press else [],'selected':selected}
-                    controls.append(facts)
-                    if len(known)==1 and known[0] in trade_labels:
-                        candidates.append((ref,facts))
-                # The main window's direct AXList is the native sidebar.
-                # Never enter financial tables or nested lists/outlines.
-                direct_sidebar = role=='AXList' and path[:2]==('AXWindow','AXList') and depth<=4
-                if role in ('AXTable','AXList','AXOutline') and not direct_sidebar:
-                    if action=='inspect':
-                        pruned.append({'role':role,'identifier':safe_identifier(ref),'window_path':list(path)})
-                    continue
-                children=self._get(ref,'AXChildren') or []
-                if ref==root:
-                    children=list(children)
-                    for relation in ('AXToolbar','AXContents','AXChildrenInNavigationOrder'):
-                        extra=self._get(ref,relation)
-                        if isinstance(extra,(list,tuple)):children.extend(extra)
-                        elif extra is not None and not isinstance(extra,(str,bool,int,float)):children.append(extra)
-                if not isinstance(children,(list,tuple)):_block('AX_TRAVERSAL_LIMIT')
-                if depth>=app.max_depth and children:_block('AX_TRAVERSAL_LIMIT')
-                queue.extend((child,depth+1,path) for child in children)
-            # User-confirmed screenshot profile: main-window direct children
-            # 1..9 are nine 56pt sidebar controls; child 6 is trade. Re-prove
-            # the entire relative layout each discovery; never click pixels.
-            if not candidates:
-                import math
-                children=self._get(root,'AXChildren') or []
-                pos=self._get(root,'AXPosition')
-                shape=len(children)>=10 and isinstance(pos,dict)
-                if shape:
-                    for i in range(1,10):
-                        item=children[i]
-                        sub=self._get(item,'AXSubrole');role=self._get(item,'AXRole')
-                        if sub=='AXSecureTextField' or role!='AXButton':shape=False;break
-                        p=self._get(item,'AXPosition');s=self._get(item,'AXSize')
-                        if not isinstance(p,dict) or not isinstance(s,dict):shape=False;break
-                        observed=(p.get('x'),p.get('y'),s.get('width'),s.get('height'),pos.get('x'),pos.get('y'))
-                        if any(type(v) not in (int,float) or not math.isfinite(v) for v in observed):shape=False;break
-                        if not (abs(p['x']-pos['x']+1)<=2 and abs(p['y']-pos['y']-(91+(i-1)*54))<=2 and abs(s['width']-56)<=2 and abs(s['height']-56)<=2):shape=False;break
-                if shape:
-                    target=children[6]
-                    effects=app.backend.actions(target)
-                    facts={'role':'AXButton','identifier':safe_identifier(target),'labels':['交易'],
-                        'enabled':self._get(target,'AXEnabled') is True,
-                        'actions':['AXPress'] if 'AXPress' in effects else [],'selected':None,
-                        'locator':'USER_CONFIRMED_SIDEBAR_CHILD_6','child_index':6}
-                    candidates.append((target,facts));controls.append(facts)
-            return controls,candidates,counts,unsafe,hints,pruned,sidebar_nodes
-        controls,candidates,counts,unsafe,hints,pruned,sidebar_nodes=discover()
-        panel=None
-        if counts['天府证券']==1 and not unsafe:
-            try:
-                detected=session.detect()['page']
-                if detected in ('持仓','委托','成交'):panel=detected
-            except Exception as exc:
-                from .._ax.errors import ElementNotFound, AmbiguousMatch
-                if not isinstance(exc,(ElementNotFound,AmbiguousMatch)):raise
-        result={'status':'TRADE_PAGE_INSPECTED','press_attempted':False,'execution_enabled':False,
-                'trade_page_verified':panel is not None,'panel':panel,'forbidden_or_modal':unsafe,
-                'known_labels':counts,'controls':controls,'trade_control_count':len(candidates),'navigation_hints':hints}
-        if action=='inspect':
-            windows=self._get(app._root,'AXWindows') or []
-            if not isinstance(windows,(list,tuple)) or len(windows)>12:_block('AX_TRAVERSAL_LIMIT')
-            census=[]
-            for win in windows:
-                if self._get(win,'AXSubrole')=='AXSecureTextField':continue
-                facts={'is_current':app.backend.key(win)==app.backend.key(root),'identifier':safe_identifier(win),'roles':{},'navigation':[]}
-                facts['position']=self._get(win,'AXPosition');facts['size']=self._get(win,'AXSize');facts['indexed_nodes']=[]
-                pending=[(win,0,[])];visited=set()
-                while pending:
-                    item,level,index_path=pending.pop(0);key=app.backend.key(item)
-                    if key in visited:continue
-                    visited.add(key)
-                    if len(visited)>app.max_nodes:_block('AX_TRAVERSAL_LIMIT')
-                    sub=self._get(item,'AXSubrole');role=self._get(item,'AXRole')
-                    if sub=='AXSecureTextField' or role in ('AXTextField','AXTextArea','AXSecureTextField','AXMenu','AXMenuBar'):continue
-                    safe_role=role if role in path_roles else 'AXOther'
-                    facts['roles'][safe_role]=facts['roles'].get(safe_role,0)+1
-                    if role in roles or level<=2:
-                        facts['indexed_nodes'].append({'path':index_path,'role':safe_role,'identifier':safe_identifier(item),'position':self._get(item,'AXPosition'),'size':self._get(item,'AXSize')})
-                    if role in roles or role=='AXStaticText':
-                        words=[self._get(item,a) for a in ('AXTitle','AXDescription','AXHelp')]
-                        if role in ('AXButton','AXStaticText'):words.append(self._get(item,'AXValue'))
-                        matched=sorted({w for w in words if type(w) is str and w in labels})
-                        if matched:facts['navigation'].append({'role':safe_role,'labels':matched,'identifier':safe_identifier(item)})
-                    if role in ('AXTable','AXList','AXOutline','AXSheet','AXDialog'):continue
-                    children=self._get(item,'AXChildren') or []
-                    if level>=app.max_depth and children:_block('AX_TRAVERSAL_LIMIT')
-                    pending.extend((child,level+1,index_path+[i]) for i,child in enumerate(children))
-                census.append(facts)
-            return {**result,'pruned_containers':pruned,'sidebar_nodes':sidebar_nodes,'windows_census':census}
-
-        if panel is not None:return {**result,'status':'ALREADY_TRADE_PAGE'}
-        if unsafe or counts['天府证券']>0:return {**result,'status':'SWITCH_BLOCKED'}
-        if not self.config.get('allow_navigation',False):return {**result,'status':'NAVIGATION_DISABLED'}
-        if len(candidates)!=1:return {**result,'status':'TRADE_CONTROL_NOT_UNIQUE'}
-        ref,facts=candidates[0]
-        if not facts['enabled'] or 'AXPress' not in facts['actions'] or facts['selected'] is True:
-            return {**result,'status':'TRADE_CONTROL_UNSAFE'}
-        # Prove identity and fresh window membership again before claiming input.
-        if self._owned_effect(self._runtime.app_identity)!=identity:_block('NATIVE_CONTINUITY_CHANGED')
-        if app.backend.key(session.scope().root)!=app.backend.key(root):_block('NATIVE_CONTINUITY_CHANGED')
-        _,fresh,fresh_counts,fresh_unsafe,_,_,_=discover()
-        if fresh_unsafe or fresh_counts!=counts or len(fresh)!=1 or app.backend.key(fresh[0][0])!=app.backend.key(ref) or fresh[0][1]!=facts:
-            return {**result,'status':'SWITCH_BLOCKED'}
-        if self._owned_effect(self._runtime.app_identity)!=identity:_block('NATIVE_CONTINUITY_CHANGED')
-        if app.backend.key(session.scope().root)!=app.backend.key(root):_block('NATIVE_CONTINUITY_CHANGED')
-        if not self._navigation_modal_clear(app,session,identity,root,switch_front):return {**result,'status':'SWITCH_BLOCKED'}
-        self._owner_proof()
-        budget.check()
-        # Claimed BEFORE dispatch: even an uncertain native failure cannot replay.
-        self._trade_page_claimed=True
-        result.update(status='SWITCH_UNCONFIRMED',press_attempted=True,trade_page_verified=False,panel=None)
-        try:
-            def dispatch():
-                if not isinstance(self._runtime.backend,_BudgetNativeBackend):rb.mark_rpc()
-                return self._runtime.backend.perform(ref,'AXPress')
-            self._owned_effect(dispatch)
-            app2,session2,identity2=self._connect()
-            if identity2!=identity or app2.backend.key(session2.scope().root)!=app.backend.key(root):
-                return result
-            auth=self._login_entry('login-status',budget,binding=(identity,app.backend.key(app._root),app.backend.key(root)))
-            if auth['status'] in ('LOGIN_RESULT_UNRECOGNIZED','LOGIN_COMMUNICATION_ERROR'):return result
-            if (not auth['already_logged_in'] and auth['login_control_count']==1 and not any(f['role'] in ('AXSheet','AXDialog') for f in auth['auth_forms'])) or any(f['signature'] and f['role']=='AXSheet' for f in auth['auth_forms']):
-                self._trade_page_claimed=False
-                result.update(status='TRADE_LOGIN_ENTRY_VERIFIED')
-                return result
-            self._identity(app2,session2)
-            panel=session2.detect()['page']
-            if panel in ('持仓','委托','成交'):
-                result.update(status='TRADE_PAGE_VERIFIED',trade_page_verified=True,panel=panel)
-                self._trade_page_claimed=False
-        except Exception:
-            # Fixed uncertain result, never native exception text; slot remains
-            # owned until the original Engine drains/finalizes this budget.
-            return result
-        return result
+        from .trade_navigation import trade_page
+        return trade_page(self, action, budget)
 
     def read_budgeted(self,kind,*,budget):
         rb.require(budget)
@@ -1243,7 +872,7 @@ class PymacautoBackend:
         self._thread()
         if kind == 'holdings-refresh-controls':
             rb.require(self._read_budget)
-            return self._refresh_discover()
+            return self.holdings_refresh.discover()
         if kind == 'health':
             return {'status': 'AVAILABLE', 'backend': 'direct-pymacauto', 'profile_id': self.profile['profile_id'],
                     'execution_enabled': False, 'runtime_transaction': False,
@@ -1259,11 +888,17 @@ class PymacautoBackend:
             return self._read_form()
         if kind == 'form-discovery':
             return self._read_form(side_aware=True)
-        if kind == 'positions-panel' and (not budget.read_only or self.config.get('allow_trade') is not False):
+        if kind in ('positions-panel', 'positions-panel-summary', 'available-cash') and (
+                not budget.read_only or self.config.get('allow_trade') is not False):
             _block('UNSUPPORTED_READ_KIND')
-        if kind not in ('current', 'positions', 'positions-panel', 'positions-scope-diagnostic', 'orders', 'trades', 'account'):
+        if kind not in ('current', 'positions', 'positions-panel', 'positions-panel-summary',
+                        'positions-scope-diagnostic', 'orders', 'trades', 'account', 'available-cash'):
             _block('UNSUPPORTED_READ_KIND')
         try:
+            if kind in ('positions', 'positions-panel', 'positions-panel-summary', 'positions-scope-diagnostic'):
+                return holdings.read(self, kind)
+            if kind == 'available-cash':
+                return self._available_cash()
             if kind in ('orders', 'trades'):
                 # No silent binding from configured raw shareholder tokens alone.
                 # Prove the market/holder domain on the independent positions page.
@@ -1272,40 +907,11 @@ class PymacautoBackend:
                 self._scoped_position_rows(ph, pm)
                 if kind == 'trades':
                     fill_scope = self._fill_scope(proof_capture)
-            # Display polling is passive; it never switches the client's panel.
-            if kind == 'positions-panel':
-                capture = self._table(require_current='持仓')
-            else:
-                capture = self._table({'positions': '持仓', 'positions-scope-diagnostic': '持仓', 'orders': '委托', 'trades': '成交'}.get(kind))
+            capture = self._table({'orders': '委托', 'trades': '成交'}.get(kind))
             raw = capture['raw']
             headers, rows = self._matrix(raw)
-            if kind == 'positions-scope-diagnostic':
-                if self._fixed_account is None:
-                    _block('FIXED_POLICY_UNAVAILABLE')
-                scope=self._scoped_position_rows(headers,rows,diagnostic=True)
-                if self._clock()-capture['start']>15000:
-                    _block('STALE_READ_CAPTURE')
-                return dict(status='POSITIONS_SCOPE_DIAGNOSTIC_READ_ONLY',**scope,observed_row_count=len(rows),
-                    completeness_scope='AX_EXPOSED_ROWS_ONLY',account_or_history_complete=False,execution_enabled=False)
-            report = {'status': 'READ_OK', 'execution_enabled': False, 'panel': capture['panel'],
-                      'captured_start_ms': capture['start'], 'captured_end_ms': capture['end'],
-                      'completeness_scope': 'AX_EXPOSED_ROWS_ONLY', 'account_or_history_complete': False,
-                      'query_filters': 'CURRENT_UI_FILTERS_NOT_CHANGED', 'cross_table_atomic': False,
-                      'table': {k: raw[k] for k in ('row_count', 'column_count', 'sha256', 'stable_double_read',
-                                                   'row_column_crosscheck', 'completeness_scope')}}
-            if kind == 'positions':
-                report.update(account_scope=self._scope_config()[0], positions=self._scoped_position_rows(headers, rows),
-                              positions_complete=False)
-            elif kind == 'positions-panel':
-                visible, scope = self._scoped_position_rows(headers, rows, display_only=True)
-                # Do not export a raw-table hash derived in part from holder IDs.
-                report['table'].pop('sha256')
-                report.update(status='POSITIONS_PANEL_READ_ONLY', mode=self._runtime.evidence_domain.lower(),
-                              freshness_basis='CLIENT_TABLE_ONLY', upstream_freshness='UNVERIFIED', broker_as_of_ms=None,
-                              captured_at_ms=capture['start'], positions=visible, positions_complete=False, **scope)
-                if self._clock() - capture['start'] > 15000:
-                    _block('STALE_READ_CAPTURE')
-            elif kind == 'orders':
+            report = holdings.table_report(capture)
+            if kind == 'orders':
                 orders = contracts.normalize_orders(headers, rows, binding=self._binding(),
                                 captured_start_ms=capture['start'], captured_end_ms=capture['end'])
                 report['orders'] = [dict(contract_id=o.contract_id, symbol=o.symbol, name=row.get('证券名称'),
@@ -1330,7 +936,7 @@ class PymacautoBackend:
                 report['captured_end_ms'] = self._clock()
                 if report['captured_end_ms'] - capture['start'] > 15000:
                     _block('STALE_READ_CAPTURE')
-            if kind in ('positions', 'orders', 'trades'):
+            if kind in ('orders', 'trades'):
                 domain = self._runtime.evidence_domain
                 report.update(status=domain + '_' + kind.upper() + '_READ_ONLY', mode=domain.lower(),
                               captured_at_ms=capture['start'])
@@ -1341,201 +947,46 @@ class PymacautoBackend:
             if self._original is not None and getattr(self,'_read_budget',None) is None:
                 self._restore_preserving_primary(sys.exception())
 
-    def _refresh_observe(self):
-        """Current holdings only; no navigation, setters, values in discovery scan."""
-        from .._ax import read_table
-        app, session, identity = self._connect()
-        front = self._owned_effect(self._runtime.front)
-        self._identity(app, session)
-        panel = session.detect()
-        if panel['page'] != '持仓':
-            _block('REFRESH_HOLDINGS_REQUIRED')
-        if not self.config.get('allow_navigation', False):
-            _block('REFRESH_DISABLED')
-        if not self._navigation_modal_clear(app, session, identity, session.scope().root, front):
-            _block('REFRESH_STRUCTURE_UNPROVEN')
-        button, root = self._refresh_scan(app, session, panel)
-        raw = read_table(app.backend, panel['table'])
-        headers, rows = self._matrix(raw)
-        self._scoped_position_rows(headers, rows)
-        after = session.detect()
-        self._identity(app, session)
-        if (after['page'] != '持仓' or after['headers'] != panel['headers']
-                or app.backend.key(after['table']) != app.backend.key(panel['table'])
-                or self._owned_effect(self._runtime.app_identity) != identity
-                or self._owned_effect(self._runtime.front) != front):
-            _block('NATIVE_CONTINUITY_CHANGED')
-        final_button, final_root = self._refresh_scan(app, session, after)
-        if (final_button != button or final_root != root
-                or not self._navigation_modal_clear(app, session, identity, session.scope().root, front)):
-            _block('REFRESH_CONTROL_CHANGED')
-        return dict(app=app, session=session, identity=identity, front=front,
-                    root=root, table=app.backend.key(panel['table']),
-                    button=button, table_summary={'sha256':raw['sha256'],'row_count':raw['row_count']})
-
-    def _refresh_scan(self, app, session, panel):
-        root = session.scope().root
-        queue, seen, buttons, table_parents = [(root, None, 0)], set(), [], []
-        while queue:
-            rb.check()
-            ref, parent, depth = queue.pop(0)
-            key = app.backend.key(ref)
-            if key in seen:
-                _block('REFRESH_STRUCTURE_UNPROVEN')
-            seen.add(key)
-            if len(seen) > 512 or depth > 16:
-                _block('AX_TRAVERSAL_LIMIT')
-            subrole = self._get(ref, 'AXSubrole')
-            if subrole == 'AXSecureTextField':
-                continue
-            role = self._get(ref, 'AXRole')
-            if role in ('AXMenu', 'AXMenuBar', 'AXTextField', 'AXTextArea'):
-                continue
-            if role in ('AXSheet', 'AXDialog'):
-                _block('REFRESH_STRUCTURE_UNPROVEN')
-            if role == 'AXTable':
-                if key == app.backend.key(panel['table']):
-                    table_parents.append(parent)
-                continue
-            if role in ('AXList', 'AXOutline'):
-                continue
-            if role == 'AXButton':
-                labels = {a:self._get(ref, a) for a in ('AXTitle','AXDescription','AXHelp')}
-                allowed = ('刷新', '刷新持仓', '持仓刷新', 'Refresh', 'Refresh holdings')
-                values = [v for v in labels.values() if v not in (None, '')]
-                if values and all(type(v) is str and v in allowed for v in values):
-                    buttons.append(dict(ref=ref, key=key, parent=parent, labels=labels,
-                        enabled=self._get(ref,'AXEnabled') is True,
-                        actions=list(app.backend.actions(ref))))
-                continue
-            children = self._get(ref, 'AXChildren') or []
-            if not isinstance(children, (list, tuple)):
-                _block('REFRESH_STRUCTURE_UNPROVEN')
-            queue.extend((child, key, depth+1) for child in children)
-        if len(table_parents) != 1 or table_parents[0] is None:
-            _block('REFRESH_STRUCTURE_UNPROVEN')
-        candidates = [b for b in buttons if b['parent'] == table_parents[0]]
-        if len(candidates) != 1:
-            _block('REFRESH_CONTROL_UNQUALIFIED')
-        button = candidates[0]
-        if not button['enabled'] or 'AXPress' not in button['actions']:
-            _block('REFRESH_CONTROL_UNQUALIFIED')
-        return button, app.backend.key(root)
-
-    def _refresh_discover(self):
-        if self._refresh_claimed:
-            return dict(status='REFRESH_ALREADY_CLAIMED', one_shot=True,
-                        receipt=self._refresh_receipt, execution_enabled=False)
-        proof = self._refresh_observe()
-        old = self._refresh_proof
-        if old is not None and not self._refresh_same(old, proof):
-            self._refresh_token = None
-        if self._refresh_token is None:
-            import secrets
-            self._refresh_token = secrets.token_hex(32)
-        self._refresh_proof = proof
-        self._refresh_discovered_ns = time.monotonic_ns()
-        return dict(status='REFRESH_CONTROL_QUALIFIED', control_fingerprint=self._refresh_token,
-                    control={'role':'AXButton', **proof['button']['labels'], 'enabled':True,
-                             'supported_action':'AXPress','association':'DIRECT_SIBLING_OF_HOLDINGS_TABLE'},
-                    table={'row_count':proof['table_summary']['row_count']}, token_ttl_seconds=30, one_shot=True,
-                    query_performed=False, upstream_freshness='UNVERIFIED', broker_as_of=None,
-                    execution_enabled=False)
-
-    @staticmethod
-    def _refresh_same(left, right):
-        return (all(left[k] == right[k] for k in ('identity','front','root','table'))
-                and all(left['button'][k] == right['button'][k]
-                        for k in ('key','parent','labels','enabled','actions')))
-
-    def holdings_refresh_budgeted(self, payload, *, budget):
-        rb.require(budget)
-        if threading.get_ident() != self._owner:
-            _block('GUI_OWNER_THREAD_MISMATCH')
-        if self._refresh_claimed:
-            if (payload['request_id'], payload['control_fingerprint']) == self._refresh_request:
-                return copy.deepcopy(self._refresh_receipt)
-            _block('REFRESH_ALREADY_CLAIMED')
-        if self._poisoned:
-            _block('NATIVE_SESSION_UNCERTAIN')
-        if (self._refresh_token is None or payload['control_fingerprint'] != self._refresh_token
-                or time.monotonic_ns()-self._refresh_discovered_ns > 30_000_000_000):
-            _block('REFRESH_TOKEN_INVALID')
-        # Consume BEFORE observations/dispatch. Every subsequent error is terminal;
-        # no rediscovery or retry can mint a second action in this owner lifetime.
-        self._refresh_claimed = True
-        self._refresh_request = (payload['request_id'], payload['control_fingerprint'])
-        self._refresh_receipt = dict(status='REFRESH_UNKNOWN', request_id=payload['request_id'],
-            dispatch_attempted=False, dispatch_acknowledged=False, retry_allowed=False,
-            query_completion='UNVERIFIED', upstream_freshness='UNVERIFIED', broker_as_of=None,
-            execution_enabled=False, monetary_authority='NONE')
-        receipt = self._refresh_receipt
-        try:
-            with rb.at('CONTINUITY'):
-                budget.check()
-                proof = self._refresh_observe()
-                if not self._refresh_same(self._refresh_proof, proof):
-                    _block('REFRESH_CONTROL_CHANGED')
-                receipt['before_table'] = {'row_count':proof['table_summary']['row_count']}
-                def permit():
-                    # No AX observations between final lease proof and native input.
-                    budget.check()
-                    if time.monotonic_ns()-self._refresh_discovered_ns > 30_000_000_000:
-                        _block('REFRESH_TOKEN_INVALID')
-                    receipt['dispatch_attempted'] = True
-                    budget.set(dispatch_attempted=True)
-                    return True
-                proof['app'].backend.press_with_permit(proof['button']['ref'], permit)
-                receipt['dispatch_acknowledged'] = True
-                after = self._refresh_observe()
-                if not self._refresh_same(proof, after):
-                    _block('REFRESH_CONTROL_CHANGED')
-                budget.check()
-                receipt['after_table'] = {'row_count':after['table_summary']['row_count']}
-                receipt['table_observation'] = ('CLIENT_TABLE_UNCHANGED'
-                    if proof['table_summary'] == after['table_summary'] else 'CLIENT_TABLE_CHANGED')
-                receipt['status'] = 'REFRESH_DISPATCH_ACKNOWLEDGED'
-        except BaseException:
-            receipt['status'] = 'REFRESH_UNKNOWN' if receipt['dispatch_attempted'] else 'REFRESH_BLOCKED'
-            self._poisoned = receipt['dispatch_attempted']
-            budget.set(poisoned=self._poisoned)
-            raise
-        finally:
-            self._refresh_proof = None
-            self._refresh_token = None
-        return copy.deepcopy(receipt)
-
     def _scoped_position_rows(self, headers, rows, *, diagnostic=False, display_only=False):
-        parsed = contracts.table(headers, rows, ('证券代码', '股票余额', '可用余额', '成本价', '交易市场', '股东账户'))
-        if display_only and self._fixed_account is None:
-            _block('FIXED_POLICY_UNAVAILABLE')
-        scope=self._verify_fixed_rows(((r['交易市场'], r['股东账户']) for r in parsed),diagnostic=diagnostic or display_only)
-        if display_only and scope['scope_status'] not in ('FIXED_SCOPE_COMPLETE_OBSERVATION','FIXED_SCOPE_INCOMPLETE_OBSERVATION'):
-            _block('FIXED_SCOPE_CHANGED')
-        _, holders = self._scope_config()
-        if not parsed and not (diagnostic or display_only):
-            _block('SHAREHOLDER_SCOPE_UNPROVEN_EMPTY_POSITIONS')
-        scoped, symbols = [], set()
-        for row in parsed:
-            market = row['交易市场']
-            region = '上海' if market in ('沪Ａ', '沪A', '上海Ａ股', '上海A股') else '深圳'
-            if market not in contracts.MARKET_LABELS or (not diagnostic and holders.get(region) != row['股东账户']):
-                _block('SHAREHOLDER_SCOPE_MISMATCH')
-            symbol = contracts.symbol(row['证券代码'])
-            total, sellable = contracts.shares(row['股票余额']), contracts.shares(row['可用余额'])
-            if sellable > total or symbol in symbols:
-                _block('INCOHERENT_OR_DUPLICATE_POSITION')
-            symbols.add(symbol)
-            number = lambda key: None if key not in row else format(contracts.decimal_cell(row[key]), 'f')
-            scoped.append({'symbol': symbol, 'name': row.get('证券名称'), 'total': total, 'available': sellable,
-                           'cost': number('成本价'), 'market_value': number('市值'), 'current_price': number('市价'),
-                           'today_qty': None, 'yesterday_qty': None})
-        return (scoped,scope) if display_only else scope if diagnostic else scoped
+        return holdings.scoped_position_rows(self, headers, rows, diagnostic=diagnostic, display_only=display_only)
+
+    def _available_cash(self):
+        # Strict account proof, current page only; no navigation fallback.
+        app, session, identity = self._connect()
+        root = app.backend.key(session.scope().root)
+        front = self._owned_effect(self._runtime.front)
+        capture = self._table(require_current='持仓')
+        self._scoped_position_rows(*self._matrix(capture['raw']))
+        amount = self._cash(app, session)
+        if (self._owned_effect(self._runtime.app_identity) != identity
+                or app.backend.key(session.scope().root) != root
+                or self._owned_effect(self._runtime.front) != front
+                or session.detect()['page'] != '持仓'):
+            _block('NATIVE_CONTINUITY_CHANGED')
+        end = self._clock()
+        if end - capture['start'] > 15000:
+            _block('STALE_READ_CAPTURE')
+        return dict(status='AVAILABLE_CASH_READ_ONLY', cash_available=amount, panel='持仓',
+                    captured_start_ms=capture['start'], captured_end_ms=end,
+                    freshness_basis='CLIENT_UI_ONLY', upstream_freshness='UNVERIFIED',
+                    monetary_authority='NONE', execution_enabled=False)
 
     def _qualified(self):
         if (not self.profile['transaction'].get('qualified') or not self.profile['funds'].get('qualified')
-                or (self._injected_profile and self._runtime.evidence_domain != 'SYNTHETIC')):
+                or (self._injected_profile and getattr(self._runtime, 'evidence_domain', None) != 'SYNTHETIC')):
             _block('BLOCKED_PROFILE_UNQUALIFIED')
+
+    def observe_cancel(self, target):
+        from .native_cancel import observe
+        return observe(self, target)
+
+    def press_cancel(self, target):
+        from .native_cancel import press
+        return press(self, target)
+
+    def open_cancel(self, target):
+        from .native_cancel import open_dialog
+        return open_dialog(self, target)
 
     def _selector(self, app, session, selector, root=None):
         from .._ax.query import QueryScope
@@ -1576,6 +1027,8 @@ class PymacautoBackend:
 
     def observe(self, intent):
         self._thread()
+        if not self.config.get('allow_trade', False):
+            _block('NATIVE_TRADE_DISABLED')
         frozen = self._intent(intent, observation=True)
         if self._attempt is not None:
             _block('NATIVE_ATTEMPT_ALREADY_OWNED')
@@ -1856,6 +1309,10 @@ class PymacautoBackend:
 
     def restore(self):
         self._thread()
+        if self._cancel_context is not None:
+            # No speculative navigation or dismissal over a cancellation sheet.
+            from .native_cancel import finish
+            finish(self)
         if self._original is None:
             return
         app, session, _ = self._connect()

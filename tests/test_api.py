@@ -23,6 +23,14 @@ class Backend:
         self.effects.append(('operator', action, threading.get_ident()))
         return {'status': 'ALREADY_LOGGED_IN', 'press_attempted': False, 'execution_enabled': False}
 
+    def login_status(self, *, budget):
+        self.effects.append(('observe', 'login-status', threading.get_ident()))
+        return {'status': 'ALREADY_LOGGED_IN', 'press_attempted': False, 'execution_enabled': False}
+
+    def login(self, *, budget):
+        self.effects.append(('command', 'login', threading.get_ident()))
+        return {'status': 'ALREADY_LOGGED_IN', 'press_attempted': False, 'execution_enabled': False}
+
 
 class API(unittest.TestCase):
     def setUp(self):
@@ -78,7 +86,40 @@ class API(unittest.TestCase):
     def test_login_status_is_passive(self):
         status, data, _ = self.call('GET', '/v1/login/status')
         self.assertEqual((status, data['status']), (200, 'ALREADY_LOGGED_IN'))
-        self.assertEqual(self.effects[0][:2], ('operator', 'login-status'))
+        self.assertEqual(self.effects[0][:2], ('observe', 'login-status'))
+
+    def test_function_routes_have_independent_requests_on_one_worker(self):
+        requests = [('GET', '/v1/login/status', None), ('GET', '/v1/holdings', None),
+                    ('POST', '/v1/login', '{}')]
+        observed = [self.call(method, path, body)[:2] for method, path, body in requests]
+        self.assertEqual([status for status, _ in observed], [200, 200, 200])
+        self.assertEqual(observed[1][1]['positions'][0]['available'], 0)
+        self.assertEqual([(kind, key) for kind, key, _ in self.effects],
+                         [('observe', 'login-status'), ('read', 'positions-panel'),
+                          ('command', 'login')])
+        self.assertEqual(len({thread for _, _, thread in self.effects}), 1)
+
+    def test_login_command_admits_only_authenticated_empty_json(self):
+        for method, path, body, kwargs, expected in (
+            ('GET', '/v1/login', None, {}, 405),
+            ('POST', '/v1/login/status', '{}', {}, 405),
+            ('POST', '/v1/login', '{}', {'auth': False}, 401),
+            ('POST', '/v1/login', '{}', {'origin': 'https://example.invalid'}, 403),
+            ('POST', '/v1/login', '{"action":"retry-login"}', {}, 400),
+            ('POST', '/v1/login', '{"password":"fixture"}', {}, 400),
+            ('POST', '/v1/login', 'null', {}, 400),
+            ('POST', '/v1/login', '[]', {}, 400),
+        ):
+            with self.subTest(method=method, path=path, expected=expected):
+                self.assertEqual(self.call(method, path, body, **kwargs)[0], expected)
+        self.assertEqual(self.effects, [])
+
+    def test_refresh_receipt_does_not_create_backend(self):
+        self.service.engine._factory = lambda: self.fail('receipt constructed backend')
+        response = self.call('GET', '/v1/holdings/refresh/status')[:2]
+        self.assertEqual(response, (200, {'status': 'REFRESH_NOT_CLAIMED', 'execution_enabled': False}))
+        self.assertEqual(self.call('GET', '/v1/real/holdings-refresh-status')[:2], response)
+        self.assertEqual(self.effects, [])
 
     def test_auth_and_unpublished_actions_do_not_reach_backend(self):
         self.assertEqual(self.call('GET', '/v1/health', auth=False)[0], 401)

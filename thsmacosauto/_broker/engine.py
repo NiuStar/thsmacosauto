@@ -70,6 +70,9 @@ _READ_FAILURE_FRAMES = {
     'business_contracts.py': frozenset('__post_init__ aliases automatic_sell_capability blocked day decimal_cell freeze_baseline fresh normalize_available_cash normalize_native_positions normalize_orders normalize_positions position_scope_check reconcile shares size_automatic_buy state_verdict symbol table times token validate_manual_sell'.split()),
     'engine.py': frozenset('__init__ _attach_diagnostic _before_press _budget_settle _check_auto _diagnostic_status _dispatch _get_backend _http_diagnostics _loop _loop_budgeted _manual _press _read _require_execution _resolve_auto _run _run_budgeted _set_control _snapshot _transaction _validate_receipt _verify_form close dispatch event identifier immutable owned public_metadata record_http_rejection save stage telemetry_state unknown'.split()),
     'native_backend.py': frozenset('__getattr__ __init__ _admit _before_rpc _binding _block _cash _check_holders _complete _connect _day _discovered_form _fill_scope _form _form_fields _get _identity _intent _matrix _nodes _order _owned_effect _owner_failure _owner_proof _passive_effect _positions _press _profile _proof _qualified _read_form _restore_preserving_primary _scope_config _scoped_position_rows _selector _sheet _switch_page _synthetic_cash _table _thread _verify_fixed_rows _verify_framework actions app_identity confirmation dispatch front get guarded is_settable keys locate observe perform plain prepare press_confirm press_submit press_with_permit process_identity read read_budgeted reconcile refs restore root sample set set_before_press'.split()),
+    'holdings.py': frozenset({'read', 'scoped_position_rows', 'table_report'}),
+    'holdings_refresh.py': frozenset({'discover', 'dispatch', '_refresh_observe', '_refresh_scan', 'permit'}),
+    'login_status.py': frozenset({'_probe', 'sample', 'status', 'current_logged', 'logged_in'}),
     'readonly_budget.py': frozenset('__getattr__ __init__ __post_init__ _bounded _clock accumulate at bind check cost cost_receipt current effect event mark_rpc receipt remaining_seconds require set'.split()),
     'pymacauto/core.py': frozenset('__init__ _get _json_value _matches _path_step _positive _required_get _resolve_phase _selector _selector_plan _value_equal _walk _writable automation child child_window children click connect control descendants dump_tree exists explain export get get_value info inspect inspect_children is_trusted labelled_field list_apps locator_path perform read_table resolve session set_edit_text set_value wait window windows'.split()),
     'pymacauto/query.py': frozenset('__init__ find find_all walk window_scope'.split()),
@@ -215,14 +218,12 @@ class Engine:
         # Controls/status remain independent. No telemetry waits/IO in this path.
         route = urlsplit(path).path
         if method == 'POST' and path == '/v1/operator/trade-page':
-            if self.__runtime_mode is not None or self.__operation_mode != 'READ_ONLY':
-                raise ServiceError('TRANSACTION_MODE_REQUIRED',409)
+            self._require_readonly_operator()
             if (type(payload) is not dict or set(payload) != {'action'}
                     or type(payload['action']) is not str or payload['action'] not in ('login-status','inspect','switch','login-inspect','login-open','ensure-login','retry-login','fresh-login')):
                 raise ServiceError('INVALID_REQUEST',400)
             action = payload['action']
-            budget = rb.ReadBudget(read_only=True)
-            return self._run_budgeted(lambda:self._operator_trade_page(action,budget),None,[False,{}],budget)
+            return self._run_operator(lambda backend, budget: backend.trade_page(action, budget=budget))
         if self.__runtime_mode is None and self.__operation_mode == 'READ_ONLY':
             if method != 'GET':
                 raise ServiceError('TRANSACTION_MODE_REQUIRED',409)
@@ -417,13 +418,22 @@ class Engine:
             else:
                 future.set_result(result)
 
-    def _operator_trade_page(self, action, budget):
+    def _require_readonly_operator(self):
+        if self.__runtime_mode is not None or self.__operation_mode != 'READ_ONLY':
+            raise ServiceError('TRANSACTION_MODE_REQUIRED', 409)
+
+    def _run_operator(self, operation):
+        self._require_readonly_operator()
+        budget = rb.ReadBudget(read_only=True)
+        return self._run_budgeted(lambda: self._operator_call(operation, budget), None, [False, {}], budget)
+
+    def _operator_call(self, operation, budget):
         with rb.bind(budget), rb.cost('READ_TOTAL'):
             budget.check()
             backend = self._get_backend()
             budget.event('FACTORY_RETURNED')
             budget.check()
-            result = backend.trade_page(action,budget=budget)
+            result = operation(backend, budget)
             budget.check()
             return result
 
