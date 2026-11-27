@@ -1,0 +1,10 @@
+{
+  "host": "127.0.0.1",
+  "port": 18880,
+  "token_file": "/absolute/private/bearer",
+  "account_policy_file": "/absolute/private/account-policy.json",
+  "owner_directory": "/absolute/private/owner",
+  "writer_inventory_complete": false,
+  "known_writer_markers": [],
+  "allow_navigation": false
+}

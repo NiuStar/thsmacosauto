@@ -1,0 +1,285 @@
+{
+  "broker_manifest_sha256": "2f984aa734ff20933e7fa7937aad73d558dfd9941837c8c64addc50eeb1cdaa7",
+  "adapted_from": {
+    "thsmacosauto/_broker/account_observation.py": {
+      "source": "broker/candidate/account_observation.py",
+      "source_sha256": "ba08de3bf7c03891c7c00e676a3de654f70648f6729c2f2beb7a04ec279bfaa1",
+      "export_sha256": "e134992b4b779e992ce738f4725a196dde53870f239b7a78a426d7ef5d6117dc"
+    },
+    "thsmacosauto/_broker/business_contracts.py": {
+      "source": "broker/candidate/business_contracts.py",
+      "source_sha256": "dca7eff4592293b8f8b38cb44d02c9b83a4805458ecb8f5967fd482293089dda",
+      "export_sha256": "0ed9d0bdc53c7a71bd7a41705994dedcf890f72bfe928541fce9da554cf6d534"
+    },
+    "thsmacosauto/_broker/buy_form_discovery.py": {
+      "source": "broker/candidate/buy_form_discovery.py",
+      "source_sha256": "2b5abbb58bd719f657f58fe943d6eb9f5c858029ba2e7f48b8a6b3bf9c814bb2",
+      "export_sha256": "181b526891c92d52113021e3b1e29c2122528fdab2b025dc8acdd1c55aa30f83"
+    },
+    "thsmacosauto/_broker/buy_only_policy.py": {
+      "source": "broker/candidate/buy_only_policy.py",
+      "source_sha256": "2ae08396e0e052f0ccae7cfe04023af36481a69dc71c496a39bc6ed6dcc28e7c",
+      "export_sha256": "5fa8558e3a26884359bf6244a90a2dfedb910f64ad4648237b707f0c4815f0a5"
+    },
+    "thsmacosauto/_broker/disconnect_warning.py": {
+      "source": "broker/candidate/disconnect_warning.py",
+      "source_sha256": "dba72917ba3e05452f925d4cd4c13fbd3cba0ee22830082a4c73a36df318a366",
+      "export_sha256": "5809df17117a830bc71c565d5388868bb458f56a177b20fbbdeceaa31e784f56"
+    },
+    "thsmacosauto/_broker/engine.py": {
+      "source": "broker/candidate/engine.py",
+      "source_sha256": "0013c9ef62b21a706fc4d568ecbe5727ae865c7afdfb762001f6205d94fb0291",
+      "export_sha256": "26b4fb2bc2da06e00ba6221f4b201d66ce05fbe2dbf1a3e61f79928495b14f34"
+    },
+    "thsmacosauto/_broker/engine_telemetry.py": {
+      "source": "broker/candidate/engine_telemetry.py",
+      "source_sha256": "850137fe6ffa603fca378a19e7261dab00426316ee0e77da7c28170c2c64b1b1",
+      "export_sha256": "d9c6b0490d35ce2dce447a8798930585fef001db3466c775da32a381bf1c13e9"
+    },
+    "thsmacosauto/_broker/fill_evidence.py": {
+      "source": "broker/candidate/fill_evidence.py",
+      "source_sha256": "6bc63f477688f681c31a347206e9927fae8e8296fa6854d9f5ba95c9e786027b",
+      "export_sha256": "fdab9231acbe53e7262c975e6b0054ac8c708728326916b34797d74333c47220"
+    },
+    "thsmacosauto/_broker/form_discovery.py": {
+      "source": "broker/candidate/form_discovery.py",
+      "source_sha256": "45307c011aca12e6332a45315708fb8d4d2fdeba8b2680e0fe99997aa5ab9bef",
+      "export_sha256": "1eb3499fcadb622e60a5c53ab27a416c9568cbd7032d736a3b38b64ec6d407ba"
+    },
+    "thsmacosauto/_broker/gui_ownership.py": {
+      "source": "broker/candidate/gui_ownership.py",
+      "source_sha256": "1aa863890c4bfc4db6888e9292857547c553390919efb1542d0a2ea6f8955f66",
+      "export_sha256": "fa7567fb925fce9fc217452168f8d15dc8100419a6816c079e5c44efd8b70a8d"
+    },
+    "thsmacosauto/_broker/journal.py": {
+      "source": "broker/candidate/journal.py",
+      "source_sha256": "e14c03532ab7de480d4ac8f310467f42521f44b8156baa38b72ead9582d6e81f",
+      "export_sha256": "8a9025da474c5b2a6f193af977775d38cfbc2a8ec0404a398333be0a66be0843"
+    },
+    "thsmacosauto/_broker/login_auto.py": {
+      "source": "broker/candidate/login_auto.py",
+      "source_sha256": "21dc1c7ff07107061a89bdd7b7f58257c13ca15d9ef99415e13df71b4cbc008b",
+      "export_sha256": "028581c7958d573930bb8baf4ee6053f222ef3003ae2461a7e2340d1f0db35d7"
+    },
+    "thsmacosauto/_broker/login_result.py": {
+      "source": "broker/candidate/login_result.py",
+      "source_sha256": "c4a71697c92546b85c887b3bba6ba480924b247bc7ed47dc8a8bfb125df5bc04",
+      "export_sha256": "536911a0dc6344d49b3d2a46a9168a80c90f90d8820fa0ac97186bbb74d23d8d"
+    },
+    "thsmacosauto/_broker/login_retry.py": {
+      "source": "broker/candidate/login_retry.py",
+      "source_sha256": "ba9ec1333584998c26f61dde02f2438aba7f2337593e1a686a19ebbfe70cf4ab",
+      "export_sha256": "d2173eb770ef154b648ced99031958bde8489bc5c446b17aa4a76eed6eea16c3"
+    },
+    "thsmacosauto/_broker/native_backend.py": {
+      "source": "broker/candidate/native_backend.py",
+      "source_sha256": "78b58faa31ca5f672c965dec714228e65bdb4cde896d4c225bd39dfc44783567",
+      "export_sha256": "61539219dfc7e31dad5c7d8b6cb48ae65beeb6c368296ca5c555a7f2514301b0"
+    },
+    "thsmacosauto/_broker/observability.py": {
+      "source": "broker/candidate/observability.py",
+      "source_sha256": "dc0ecd74b206288216894333beb489a5b4ac34b129d51d0e30a4fa6d81b4934e",
+      "export_sha256": "dc0ecd74b206288216894333beb489a5b4ac34b129d51d0e30a4fa6d81b4934e"
+    },
+    "thsmacosauto/_broker/order_sizing.py": {
+      "source": "broker/candidate/order_sizing.py",
+      "source_sha256": "1a405a7fec0028c492cf9f30bca322508ab72f5cf3dd682557b5e31db69b62ee",
+      "export_sha256": "1a405a7fec0028c492cf9f30bca322508ab72f5cf3dd682557b5e31db69b62ee"
+    },
+    "thsmacosauto/_broker/private_policy_read.py": {
+      "source": "broker/candidate/private_policy_read.py",
+      "source_sha256": "d273ef0328a0313f7cb458dd906653e1c2f0b3e550b0081964fbf7eb4739c263",
+      "export_sha256": "d273ef0328a0313f7cb458dd906653e1c2f0b3e550b0081964fbf7eb4739c263"
+    },
+    "thsmacosauto/_broker/readonly_budget.py": {
+      "source": "broker/candidate/readonly_budget.py",
+      "source_sha256": "363f583a89ce6acc5f76bb8ddc51cf100a832b53f2517a9bdb955a795569d7ac",
+      "export_sha256": "363f583a89ce6acc5f76bb8ddc51cf100a832b53f2517a9bdb955a795569d7ac"
+    },
+    "thsmacosauto/_broker/server.py": {
+      "source": "broker/candidate/server.py",
+      "source_sha256": "5ca5c22f6d0bc26f1b4f86badef584f90ac0c52564f881b3f3afc1a052b10567",
+      "export_sha256": "43a0945d522b28a32c89136c9f91f33c0ae4e53b90888d23646600239bf42c0a"
+    },
+    "thsmacosauto/_broker/shadow_admission.py": {
+      "source": "broker/candidate/shadow_admission.py",
+      "source_sha256": "4f0f1e5b2391f66af21ad1584a7247eed7e53135d0f1805e0891a04b31060375",
+      "export_sha256": "4f0f1e5b2391f66af21ad1584a7247eed7e53135d0f1805e0891a04b31060375"
+    },
+    "thsmacosauto/_broker/single_fixed_account.py": {
+      "source": "broker/candidate/single_fixed_account.py",
+      "source_sha256": "4fb7217b73797549fd7760f54691a7e39b13eaf00cd96e5f77520053e364de94",
+      "export_sha256": "c799a50739bcb0e163465fddc2b3a56fba74f4d63d203bc3e8ffa48bd646e466"
+    },
+    "thsmacosauto/_broker/state_lifecycle.py": {
+      "source": "broker/candidate/state_lifecycle.py",
+      "source_sha256": "aec97511b58bda0d41b8883032f0296e876de643b065acbaa37d6409047835a1",
+      "export_sha256": "d03a04106eeab2099cb2e52c890d9eae68053c295665ce1339ab59ba4bc76ca3"
+    },
+    "thsmacosauto/_ax/__init__.py": {
+      "source": "broker/framework/pymacauto/__init__.py",
+      "source_sha256": "e40c2bf3944abd0305e9cd637cded4602d6bb0b6e227779664500cd517069960",
+      "export_sha256": "e40c2bf3944abd0305e9cd637cded4602d6bb0b6e227779664500cd517069960"
+    },
+    "thsmacosauto/_ax/__main__.py": {
+      "source": "broker/framework/pymacauto/__main__.py",
+      "source_sha256": "79ee6f134c5c5193377cf9b189cbdcc3e2095e49ba9cec310114441c15a917c4",
+      "export_sha256": "79ee6f134c5c5193377cf9b189cbdcc3e2095e49ba9cec310114441c15a917c4"
+    },
+    "thsmacosauto/_ax/automation.py": {
+      "source": "broker/framework/pymacauto/automation.py",
+      "source_sha256": "e60c03472313776ab675da604175f14b70d659c8c32b90ccbca60f9bd3e573f8",
+      "export_sha256": "e60c03472313776ab675da604175f14b70d659c8c32b90ccbca60f9bd3e573f8"
+    },
+    "thsmacosauto/_ax/cli.py": {
+      "source": "broker/framework/pymacauto/cli.py",
+      "source_sha256": "00e4def86b829ef0cfd85e15031017da8d86cb2b905f77cb203bfa91e8e39e84",
+      "export_sha256": "00e4def86b829ef0cfd85e15031017da8d86cb2b905f77cb203bfa91e8e39e84"
+    },
+    "thsmacosauto/_ax/collection.py": {
+      "source": "broker/framework/pymacauto/collection.py",
+      "source_sha256": "3617841b508fca9e417b8472a24a25eaec20dc59478439c109be08ca1c0af49a",
+      "export_sha256": "3617841b508fca9e417b8472a24a25eaec20dc59478439c109be08ca1c0af49a"
+    },
+    "thsmacosauto/_ax/controls.py": {
+      "source": "broker/framework/pymacauto/controls.py",
+      "source_sha256": "8d0f3592fedd5672969b10ff1dafa926927580ff130a2d8f1398b384fbff9158",
+      "export_sha256": "8d0f3592fedd5672969b10ff1dafa926927580ff130a2d8f1398b384fbff9158"
+    },
+    "thsmacosauto/_ax/core.py": {
+      "source": "broker/framework/pymacauto/core.py",
+      "source_sha256": "cd334a395df21fd90d49da43d0e32d32c68cd569a06fceab9f80e9e052c277ad",
+      "export_sha256": "cd334a395df21fd90d49da43d0e32d32c68cd569a06fceab9f80e9e052c277ad"
+    },
+    "thsmacosauto/_ax/deadlines.py": {
+      "source": "broker/framework/pymacauto/deadlines.py",
+      "source_sha256": "df4f08484047796015028e4c9b279567bc20345f675ce647fae1d539c910fda7",
+      "export_sha256": "df4f08484047796015028e4c9b279567bc20345f675ce647fae1d539c910fda7"
+    },
+    "thsmacosauto/_ax/errors.py": {
+      "source": "broker/framework/pymacauto/errors.py",
+      "source_sha256": "781879456504062262d0cd8f9f7132d6c7bc16f0bebd3d89125624f7d053887a",
+      "export_sha256": "781879456504062262d0cd8f9f7132d6c7bc16f0bebd3d89125624f7d053887a"
+    },
+    "thsmacosauto/_ax/events.py": {
+      "source": "broker/framework/pymacauto/events.py",
+      "source_sha256": "ad73eb8387a082834253f85d5f27062c62cfa2190b2a50ab9c7a58f9c7c7e72f",
+      "export_sha256": "ad73eb8387a082834253f85d5f27062c62cfa2190b2a50ab9c7a58f9c7c7e72f"
+    },
+    "thsmacosauto/_ax/fields.py": {
+      "source": "broker/framework/pymacauto/fields.py",
+      "source_sha256": "a207ff827db6f453d1cf56289f24763885e769fa3f149ea5b97dcae8ea69858d",
+      "export_sha256": "a207ff827db6f453d1cf56289f24763885e769fa3f149ea5b97dcae8ea69858d"
+    },
+    "thsmacosauto/_ax/focus.py": {
+      "source": "broker/framework/pymacauto/focus.py",
+      "source_sha256": "4a4a4b7e3d15d3fdab3152f7f2f68197cdd5cc7222d6f7f687a10083f3b8df89",
+      "export_sha256": "4a4a4b7e3d15d3fdab3152f7f2f68197cdd5cc7222d6f7f687a10083f3b8df89"
+    },
+    "thsmacosauto/_ax/inspector.py": {
+      "source": "broker/framework/pymacauto/inspector.py",
+      "source_sha256": "6ef7e159fa60d742396eb6a85e950e08cee805dbf877da1147a095e4a9bfed77",
+      "export_sha256": "6ef7e159fa60d742396eb6a85e950e08cee805dbf877da1147a095e4a9bfed77"
+    },
+    "thsmacosauto/_ax/journal.py": {
+      "source": "broker/framework/pymacauto/journal.py",
+      "source_sha256": "3a156f3ead8055942742769ac3096d8b869165ba1ace7e772ea6eb28daeeaeab",
+      "export_sha256": "3a156f3ead8055942742769ac3096d8b869165ba1ace7e772ea6eb28daeeaeab"
+    },
+    "thsmacosauto/_ax/locator_diagnostics.py": {
+      "source": "broker/framework/pymacauto/locator_diagnostics.py",
+      "source_sha256": "52fcdfd283ee2d208835e56e8376268fcf56720fb59db1a35c1a08c576145da0",
+      "export_sha256": "52fcdfd283ee2d208835e56e8376268fcf56720fb59db1a35c1a08c576145da0"
+    },
+    "thsmacosauto/_ax/metrics.py": {
+      "source": "broker/framework/pymacauto/metrics.py",
+      "source_sha256": "5df2915c1c687729acafb88dd56f5174896b8baa2db3e48734e95210301ea0aa",
+      "export_sha256": "5df2915c1c687729acafb88dd56f5174896b8baa2db3e48734e95210301ea0aa"
+    },
+    "thsmacosauto/_ax/native.py": {
+      "source": "broker/framework/pymacauto/native.py",
+      "source_sha256": "dfbbd2fbf02ad216b8528847aa148cdeb1ee2141e02393aa22fbf51a9fa035f8",
+      "export_sha256": "dfbbd2fbf02ad216b8528847aa148cdeb1ee2141e02393aa22fbf51a9fa035f8"
+    },
+    "thsmacosauto/_ax/operations.py": {
+      "source": "broker/framework/pymacauto/operations.py",
+      "source_sha256": "4bdca32c720dbc8f3c508ae58e64a8d069f515c607fc18d2b6ccdcf364c9566a",
+      "export_sha256": "4bdca32c720dbc8f3c508ae58e64a8d069f515c607fc18d2b6ccdcf364c9566a"
+    },
+    "thsmacosauto/_ax/pages.py": {
+      "source": "broker/framework/pymacauto/pages.py",
+      "source_sha256": "5308c9427ddc780c928bb3f8387b8698e3edda70cc1c7a5e14c4e06dcd681ab7",
+      "export_sha256": "5308c9427ddc780c928bb3f8387b8698e3edda70cc1c7a5e14c4e06dcd681ab7"
+    },
+    "thsmacosauto/_ax/plans.py": {
+      "source": "broker/framework/pymacauto/plans.py",
+      "source_sha256": "8320ec0ba2b827ba92b2a57e233569c56292d697f6dac6fa9496da2fe65eae5c",
+      "export_sha256": "8320ec0ba2b827ba92b2a57e233569c56292d697f6dac6fa9496da2fe65eae5c"
+    },
+    "thsmacosauto/_ax/profiles.py": {
+      "source": "broker/framework/pymacauto/profiles.py",
+      "source_sha256": "156fc0de4e8b62e38fce70c4091f744ffd9dbffa26d5379082ac9c970dbade85",
+      "export_sha256": "156fc0de4e8b62e38fce70c4091f744ffd9dbffa26d5379082ac9c970dbade85"
+    },
+    "thsmacosauto/_ax/query.py": {
+      "source": "broker/framework/pymacauto/query.py",
+      "source_sha256": "6da5a47d1c95c0ed4682d39bfa50634419ee83e658b5bf2b05de862ae36f3935",
+      "export_sha256": "6da5a47d1c95c0ed4682d39bfa50634419ee83e658b5bf2b05de862ae36f3935"
+    },
+    "thsmacosauto/_ax/query_context.py": {
+      "source": "broker/framework/pymacauto/query_context.py",
+      "source_sha256": "b54e7c868cad38a10097d3890afcde3a7b87e8c04e4322ff4089702e52f6a465",
+      "export_sha256": "b54e7c868cad38a10097d3890afcde3a7b87e8c04e4322ff4089702e52f6a465"
+    },
+    "thsmacosauto/_ax/tables.py": {
+      "source": "broker/framework/pymacauto/tables.py",
+      "source_sha256": "5489e660f0136225f71debc0b5c375acacdd9a33befb13e4bf5ef31fcdda3cc9",
+      "export_sha256": "5489e660f0136225f71debc0b5c375acacdd9a33befb13e4bf5ef31fcdda3cc9"
+    },
+    "thsmacosauto/_ax/ths_navigation.py": {
+      "source": "broker/framework/pymacauto/ths_navigation.py",
+      "source_sha256": "8bf1618d3773c7a680f2ded6f48b0039376a0be142f3ecdc59729975d4d5a40b",
+      "export_sha256": "8bf1618d3773c7a680f2ded6f48b0039376a0be142f3ecdc59729975d4d5a40b"
+    },
+    "thsmacosauto/_ax/ths_profile.py": {
+      "source": "broker/framework/pymacauto/ths_profile.py",
+      "source_sha256": "9f632dd3a9916f55688bb3e1e028a189c10373afaf1bc986dc5bb4cdfc412d58",
+      "export_sha256": "9f632dd3a9916f55688bb3e1e028a189c10373afaf1bc986dc5bb4cdfc412d58"
+    },
+    "thsmacosauto/_ax/ths_query.py": {
+      "source": "broker/framework/pymacauto/ths_query.py",
+      "source_sha256": "2ca0b5332516ed5b422ded4b9817b61b4372c164b4dc1b47c5b99372042ebc41",
+      "export_sha256": "2ca0b5332516ed5b422ded4b9817b61b4372c164b4dc1b47c5b99372042ebc41"
+    },
+    "thsmacosauto/_ax/ths_reader.py": {
+      "source": "broker/framework/pymacauto/ths_reader.py",
+      "source_sha256": "7d955bb8247717b95ecee69ced1fe039cb9c6554c09ba2ce43d11558243b395d",
+      "export_sha256": "0a857392a1bd44628bcdf5c4a965d325015ec329e66ffcc5cbdb8e134732c395"
+    },
+    "thsmacosauto/_ax/validation.py": {
+      "source": "broker/framework/pymacauto/validation.py",
+      "source_sha256": "436bec068b98a35b4cd2c2f1fe00e1269b31e11b48fbfb2aee09377eb0015d67",
+      "export_sha256": "436bec068b98a35b4cd2c2f1fe00e1269b31e11b48fbfb2aee09377eb0015d67"
+    },
+    "thsmacosauto/_broker/native_profile.json": {
+      "source": "broker/candidate/native_profile.json",
+      "source_sha256": "cd37fd0757b0c9ca00c9159c044c3c5c9eb3bdff906bfbea66323b8a7a7fa0fa",
+      "export_sha256": "d88d2d867aa524b266ccbb4dbf7916d6c289d86255a20fb950f1c9e9d03b9d23"
+    },
+    "thsmacosauto/_ax/LICENSE.txt": {
+      "source": "readonly-login-restore-r8/broker/framework/LICENSE",
+      "source_sha256": "faff195ce840d07a6653f1072169b8a20fc75181b1495e702e015330fe5ef185",
+      "repository_commit": "7cbb2dfb07299a7839cb11871fa7b0435994e51c",
+      "export_sha256": "faff195ce840d07a6653f1072169b8a20fc75181b1495e702e015330fe5ef185"
+    },
+    "tests/synthetic_ax.py": {
+      "source": "tests/synthetic_ax_fixture.py",
+      "source_sha256": "442f0ad8485f792ca69f20611be9f453838b865814b13d978b787e645ce8aad5",
+      "export_sha256": "6b4cb1d0ab4e3cfbbb2103f6130bff0386108c91224ee00d332d7824f75ae27a"
+    }
+  },
+  "refresh_methods_donor": {
+    "source": "incumbent-feature-repair-r9/composed-source/broker/candidate/native_backend.py",
+    "source_sha256": "b3a2b3e26e6e1a7d92b8bcf9a16c1b1ee7a2551969d2c3572003339482d7b111"
+  }
+}

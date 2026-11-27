@@ -1,0 +1,186 @@
+{
+  "schema_version": 1,
+  "profile_id": "ths-5.3.5-7.0.62-direct-v1",
+  "app": {
+    "bundle_id": "cn.com.10jqka.macstockPro",
+    "version": "5.3.5",
+    "build": "7.0.62",
+    "path": "/Applications/同花顺.app"
+  },
+  "framework": {
+    "version": "0.8.0",
+    "source_commit": "f24de19bbb903d5442e106df926db77e34ee4d39",
+    "files": {
+      "__init__.py": "e40c2bf3944abd0305e9cd637cded4602d6bb0b6e227779664500cd517069960",
+      "__main__.py": "79ee6f134c5c5193377cf9b189cbdcc3e2095e49ba9cec310114441c15a917c4",
+      "automation.py": "e60c03472313776ab675da604175f14b70d659c8c32b90ccbca60f9bd3e573f8",
+      "cli.py": "00e4def86b829ef0cfd85e15031017da8d86cb2b905f77cb203bfa91e8e39e84",
+      "collection.py": "3617841b508fca9e417b8472a24a25eaec20dc59478439c109be08ca1c0af49a",
+      "controls.py": "8d0f3592fedd5672969b10ff1dafa926927580ff130a2d8f1398b384fbff9158",
+      "core.py": "cd334a395df21fd90d49da43d0e32d32c68cd569a06fceab9f80e9e052c277ad",
+      "deadlines.py": "df4f08484047796015028e4c9b279567bc20345f675ce647fae1d539c910fda7",
+      "errors.py": "781879456504062262d0cd8f9f7132d6c7bc16f0bebd3d89125624f7d053887a",
+      "events.py": "ad73eb8387a082834253f85d5f27062c62cfa2190b2a50ab9c7a58f9c7c7e72f",
+      "fields.py": "a207ff827db6f453d1cf56289f24763885e769fa3f149ea5b97dcae8ea69858d",
+      "focus.py": "4a4a4b7e3d15d3fdab3152f7f2f68197cdd5cc7222d6f7f687a10083f3b8df89",
+      "inspector.py": "6ef7e159fa60d742396eb6a85e950e08cee805dbf877da1147a095e4a9bfed77",
+      "journal.py": "3a156f3ead8055942742769ac3096d8b869165ba1ace7e772ea6eb28daeeaeab",
+      "locator_diagnostics.py": "52fcdfd283ee2d208835e56e8376268fcf56720fb59db1a35c1a08c576145da0",
+      "metrics.py": "5df2915c1c687729acafb88dd56f5174896b8baa2db3e48734e95210301ea0aa",
+      "native.py": "dfbbd2fbf02ad216b8528847aa148cdeb1ee2141e02393aa22fbf51a9fa035f8",
+      "operations.py": "4bdca32c720dbc8f3c508ae58e64a8d069f515c607fc18d2b6ccdcf364c9566a",
+      "pages.py": "5308c9427ddc780c928bb3f8387b8698e3edda70cc1c7a5e14c4e06dcd681ab7",
+      "plans.py": "8320ec0ba2b827ba92b2a57e233569c56292d697f6dac6fa9496da2fe65eae5c",
+      "profiles.py": "156fc0de4e8b62e38fce70c4091f744ffd9dbffa26d5379082ac9c970dbade85",
+      "query.py": "6da5a47d1c95c0ed4682d39bfa50634419ee83e658b5bf2b05de862ae36f3935",
+      "query_context.py": "b54e7c868cad38a10097d3890afcde3a7b87e8c04e4322ff4089702e52f6a465",
+      "tables.py": "5489e660f0136225f71debc0b5c375acacdd9a33befb13e4bf5ef31fcdda3cc9",
+      "ths_navigation.py": "8bf1618d3773c7a680f2ded6f48b0039376a0be142f3ecdc59729975d4d5a40b",
+      "ths_profile.py": "9f632dd3a9916f55688bb3e1e028a189c10373afaf1bc986dc5bb4cdfc412d58",
+      "ths_query.py": "2ca0b5332516ed5b422ded4b9817b61b4372c164b4dc1b47c5b99372042ebc41",
+      "ths_reader.py": "0a857392a1bd44628bcdf5c4a965d325015ec329e66ffcc5cbdb8e134732c395",
+      "validation.py": "436bec068b98a35b4cd2c2f1fe00e1269b31e11b48fbfb2aee09377eb0015d67"
+    }
+  },
+  "window": {
+    "identifier": "主窗口"
+  },
+  "content_path": [
+    {
+      "role": "AXScrollArea",
+      "identifier_re": "^_NS:(210|224|79|176)$"
+    }
+  ],
+  "trigger_children_only": true,
+  "pages": {
+    "持仓": {
+      "trigger": {
+        "role": "AXButton",
+        "title": "持仓",
+        "identifier": "_NS:42"
+      },
+      "table": {
+        "role": "AXTable",
+        "identifier": "1537"
+      },
+      "headers": [
+        "证券代码",
+        "股票余额",
+        "可用余额",
+        "成本价"
+      ]
+    },
+    "委托": {
+      "trigger": {
+        "role": "AXButton",
+        "title": "委托",
+        "identifier": "_NS:38"
+      },
+      "table": {
+        "role": "AXTable",
+        "identifier": "1539"
+      },
+      "headers": [
+        "委托日期",
+        "委托时间",
+        "委托数量",
+        "合同编号"
+      ]
+    },
+    "成交": {
+      "trigger": {
+        "role": "AXButton",
+        "title": "成交",
+        "identifier": "_NS:34"
+      },
+      "table": {
+        "role": "AXTable",
+        "identifier": "1538"
+      },
+      "headers": [
+        "成交日期",
+        "成交时间",
+        "证券代码",
+        "成交数量",
+        "成交均价",
+        "成交金额",
+        "成交编号"
+      ]
+    },
+    "资金明细": {
+      "trigger": {
+        "role": "AXButton",
+        "title": "资金明细",
+        "identifier": "_NS:22"
+      },
+      "table": {
+        "role": "AXTable",
+        "identifier": "1544"
+      },
+      "headers": [
+        "发生金额",
+        "本次金额",
+        "摘要",
+        "货币单位",
+        "交易市场"
+      ]
+    }
+  },
+  "broker": {
+    "role": "AXStaticText",
+    "value": "天府证券"
+  },
+  "forbidden_text": [
+    "模拟练习",
+    "您还未登录同花顺账号"
+  ],
+  "funds": {
+    "label": "可用金额",
+    "association": "NAMED_ROW_COLUMN_REFERENCES",
+    "read_table": {
+      "role": "AXTable",
+      "identifier": "_NS:65"
+    },
+    "read_schema": "HEADERLESS_AXCELL_STATIC_TEXT_PAIR_V1",
+    "exposed_rows": 10,
+    "read_qualified": true,
+    "qualified": false
+  },
+  "transaction": {
+    "qualified": false,
+    "reason": "BLOCKED_PROFILE_UNQUALIFIED",
+    "fields": null,
+    "trading_day": null,
+    "complete_positions": null,
+    "complete_orders": null,
+    "confirmation": {
+      "sheet": {
+        "role": "AXSheet",
+        "description": "警告"
+      },
+      "confirm": {
+        "role": "AXButton",
+        "title": "确认"
+      },
+      "cancel": {
+        "role": "AXButton",
+        "title": "取消"
+      }
+    },
+    "source_supported_labels": [
+      "限价委托",
+      "代码",
+      "价格",
+      "数量",
+      "方向",
+      "确定买入",
+      "确定卖出"
+    ],
+    "unqualified_legacy_field_mapping": {
+      "code": 0,
+      "price": 1,
+      "quantity": 2
+    },
+    "qualification_note": "Legacy role ordinal mapping is source evidence only, NOT an authorized native selector. No coordinate or ordinal fallback. Complete scope and broker day evidence absent."
+  }
+}

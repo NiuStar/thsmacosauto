@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thsmacosauto"
+version = "0.1.0"
+description = "Standalone loopback HTTP service for scoped Tonghuashun macOS automation"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pyobjc-framework-Cocoa>=10; sys_platform == 'darwin'",
+    "pyobjc-framework-ApplicationServices>=10; sys_platform == 'darwin'",
+]
+
+[project.scripts]
+thsmacosauto = "thsmacosauto.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["thsmacosauto", "thsmacosauto.*"]
+
+[tool.setuptools.package-data]
+"thsmacosauto._broker" = ["native_profile.json"]
+"thsmacosauto._ax" = ["LICENSE.txt"]
