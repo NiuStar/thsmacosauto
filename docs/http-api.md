@@ -355,17 +355,18 @@
 | `POST /v1/real/holdings-refresh` | `POST /v1/holdings/refresh` | 原请求体不变，共用单次领用限制 |
 | `GET /v1/real/holdings-refresh-status` | `GET /v1/holdings/refresh/status` | 共用回执 |
 | `POST /v1/operator/trade-page`，`{"action":"ensure-login"}` | `POST /v1/login`，`{}` | 同一登录流程与持久化账本 |
-| `POST /v1/operator/trade-page`，`{"action":"login-status"}` | `GET /v1/login/status` | 同一个被动观察实现 |
+
 
 ### 旧运维入口：`POST /v1/operator/trade-page`
 
 请求体只接受 `{"action":"<动作>"}`，动作名区分大小写。普通业务不需要通过该入口操作。下表的状态为主要结果，不是完整枚举；统一检查 `status`，不能用 200 或 `press_attempted` 代替确认。
 
+`login-status` 不是这个旧 HTTP 入口支持的动作；提交会返回 `400 BAD_REQUEST`。查状态请用 `GET /v1/login/status`，或使用下表中的 `login-inspect` 做旧版诊断。
+
 | `action` | 行为和结果提示 |
 |---|---|
 | `inspect` | 被动检查交易页；`TRADE_PAGE_INSPECTED`，配合 `trade_page_verified`、`panel`、`trade_control_count` 与诊断字段判断，不点击 |
 | `switch` | 显式切到交易页，不提交凭据；`TRADE_PAGE_VERIFIED`、`ALREADY_TRADE_PAGE` 为面板观察结果，`TRADE_LOGIN_ENTRY_VERIFIED` 只表示看到登录入口/表单。`SWITCH_UNCONFIRMED` 不应重发 |
-| `login-status` | 只观察，等价于独立状态接口 |
 | `login-inspect` | 被动登录诊断，保留较详细的观察结果，例如 `LOGIN_RESULT_UNAVAILABLE`；不点击 |
 | `login-open` | 显式打开已通过核验的登录界面，必要时处理唯一获准的断线提示；不读取密码或提交；`LOGIN_DIALOG_OPENED` / `LOGIN_FORM_ALREADY_PRESENT` 都不表示已登录 |
 | `ensure-login` | 等价于独立登录入口；普通业务迁往 `/v1/login` |
