@@ -22,6 +22,8 @@ python3 -m venv .venv
 
 ## HTTP API
 
+功能拆分版见 [HTTP 接口文档（v1）](docs/http-api.md)，含接入示例。旧版实例是否支持新路由，请以 `/v1/capabilities` 为准。
+
 仅绑定回环；所有路由都需要 `Authorization: Bearer …`，返回 JSON、`Cache-Control: no-store`。供本机服务端调用，不应把令牌下发给浏览器，也不要将端口直接暴露到公网。跨设备请在部署时独立设计受控的服务器侧代理或隧道。
 
 | 方法和路由 | 用途 |
