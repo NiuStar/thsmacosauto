@@ -1,12 +1,13 @@
 # thsmacosauto HTTP 接口文档（v1）
 
-本文面向股票系统**服务端**开发者，描述功能拆分后的独立服务，**不代表旧版源码或线上实例已包含这些新路由**。同花顺桌面数据来自 macOS 辅助功能（AX），不是券商官方查询接口。接口绑定本机单一预配置账户，不接受通过请求切换券商或账户；不提供买入、卖出、撤单或量化执行。JSON 示例均为合成数据或占位值。
+本文描述默认只读服务，**不代表旧版源码或线上实例已包含这些新路由**。同花顺桌面数据来自 macOS 辅助功能（AX），不是券商官方查询接口。接口绑定本机单一预配置账户，不接受通过请求切换券商或账户；默认服务不开放买入、卖出、撤单或量化执行。独立交易接口候选见[手动交易接口](manual-trade-api.md)。JSON 示例均为合成数据或占位值。
 
 - [连接与报文约定](#transport)
 - [接口速查](#routes)
 - [健康与能力](#health)
 - [登录与登录状态](#login)
 - [持仓列表](#holdings)
+- [按证券代码或合同号查找](#lookup)
 - [刷新持仓、控件识别与回执](#refresh)
 - [扩展查询与旧版兼容](#compatibility)
 - [HTTP 错误与超时](#errors)
@@ -19,7 +20,7 @@
 |---|---|
 | 基础地址 | `http://127.0.0.1:18880`，以实际 [服务配置](configuration.md) 为准；仅监听回环地址 |
 | 鉴权 | 每个请求都必须带一个 `Authorization: Bearer <令牌>`，包括健康检查和回执。令牌从服务端私有文件读取；不是同花顺密码，也不下发给浏览器 |
-| 请求方法 | 只支持文档列出的 `GET` / `POST`。精确匹配路径，不加尾部 `/`，不带查询参数或片段。GET 不发送请求体 |
+| 请求方法 | 只支持文档列出的 `GET` / `POST`。精确匹配路径，不加尾部 `/` 或片段。仅查找接口接收表中指定的查询参数。GET 不发送请求体 |
 | POST 报文 | UTF-8 JSON 对象；`Content-Type: application/json`（也接受 `application/json; charset=utf-8`）；由 HTTP 客户端设置 `Content-Length`。不支持 `Transfer-Encoding: chunked`、`Expect: 100-continue`。普通上限 32 KiB，旧操作入口上限 64 字节 |
 | JSON 校验 | 不接受重复键、额外字段、非对象顶层或尾随 JSON；`{}`、空文本、`null` 是不同的输入 |
 | 响应 | `Content-Type: application/json; charset=utf-8`，`Cache-Control: no-store`。HTTP `200` 仍需检查业务 `status`；非 `200` 检查 `code`，不要解析英文 `message` 做业务决策 |
@@ -38,6 +39,12 @@
 | GET | `/v1/login/status` | 被动观察当前交易登录状态；不切页、不输入、不提交 |
 | POST | `/v1/login` | 显式发起登录；必要时切到交易页、打开登录框并执行受控登录 |
 | GET | `/v1/holdings` | 只读当前持仓面板；不刷新、不切页、不登录 |
+| GET | `/v1/holdings/summary` | 当前持仓行数、持有及可卖标的数；不返回持仓明细 |
+| GET | `/v1/holdings/lookup?symbol=000001` | 按六位证券代码查当前持仓面板，不切页 |
+| GET | `/v1/real/orders/lookup?contract_id=C-FIXTURE` | 按券商合同号查单笔可见委托；可能切页并恢复 |
+| GET | `/v1/real/trades/lookup?contract_id=C-FIXTURE` | 按券商合同号查所有匹配的可见成交；可能切页并恢复 |
+| GET | `/v1/account/available-cash` | 只在当前持仓页读取可用金额；不切页 |
+| GET | `/v1/real/form-discovery` | 只观察当前限价委托表单结构；不读输入框内容、不填表、不下单 |
 | GET | `/v1/holdings/refresh/controls` | 识别符合条件的刷新控件，返回短期令牌；不点击 |
 | POST | `/v1/holdings/refresh` | 显式尝试点击一次刷新；不切页、不登录，返回回执而非持仓列表 |
 | GET | `/v1/holdings/refresh/status` | 读进程内回执，不访问 AX，不初始化原生适配器 |
@@ -234,6 +241,41 @@
 
 `total > 0` 且 `available == 0` 是“仍持有但当前不可卖”，不是空仓；如仅展示当前持有行，可在展示层过滤 `total == 0`，不要篡改原始观察。`positions: []`、缺市场、接口报错或不在持仓页均不能推出全账户空仓。`FIXED_SCOPE_CHANGED` 代表范围冲突，应停止使用旧展示数据，不能靠切账户或再登录来掩盖。不要把任何该接口结果接入自动下单权限。
 
+<a id="lookup"></a>
+### 按证券代码或合同号查找
+
+三项接口均为 Bearer 鉴权 GET，不接收请求体。每次先读取并校验一次相应的可见表格，再做精确匹配；没有历史搜索、翻页、改过滤条件或刷新券商数据的动作。
+
+| 路径 | 唯一必填参数 | 结果字段 | 桌面行为 |
+|---|---|---|---|
+| `/v1/holdings/lookup` | `symbol`：六位 ASCII 数字，保留前导零 | `position`：与持仓列表单行字段相同，未命中为 `null` | 仅观察当前持仓面板，不切页；已显示的零持仓行也可以命中 |
+| `/v1/real/orders/lookup` | `contract_id`：券商合同号，匹配 `[A-Za-z0-9_.:-]{1,128}`，区分大小写 | `order`：与委托列表单行字段相同，未命中为 `null` | 沿用委托列表的严格账户范围校验；配置允许时可能切页并恢复 |
+| `/v1/real/trades/lookup` | `contract_id`：与委托查找相同 | `trades`：所有匹配的可见成交，按表格顺序返回，未命中为 `[]` | 沿用成交列表的严格账户范围校验与切页恢复；不返回原始表格或 `fill_evidence` |
+
+合同号是客户端委托/成交表的 `contract_id`，不是交易服务回执查询用的 `client_order_id`。不接受重复、额外、空白或非法参数（HTTP `400 BAD_REQUEST`）。需要切页且配置禁止导航、账户范围不成立或读表/复位失败时返回错误，不返回一个伪造的未命中结果。
+
+成功完成观察时，HTTP `200` 响应的 `status` 为 `VISIBLE_MATCH_FOUND` 或 `NOT_FOUND_IN_VISIBLE_SCOPE`，`match_count` 为匹配行数，另带原查询标识、面板、采集时间和覆盖字段。未命中只代表**本次可见范围内未找到**，不是空仓、没有委托或没有成交。持仓查找保留 `scope_status`、市场覆盖计数及 `upstream_freshness: UNVERIFIED`；成交查找保留 `native_fill_qualified: false` 和 `independent_fill_verified: false`。
+
+委托查找未命中示例（时间和合同号为合成值）：
+
+```json
+{
+  "status": "NOT_FOUND_IN_VISIBLE_SCOPE",
+  "contract_id": "C-FIXTURE",
+  "match_count": 0,
+  "order": null,
+  "mode": "synthetic",
+  "panel": "委托",
+  "captured_start_ms": 1795786171636,
+  "captured_end_ms": 1795786171699,
+  "captured_at_ms": 1795786171636,
+  "query_filters": "CURRENT_UI_FILTERS_NOT_CHANGED",
+  "completeness_scope": "AX_EXPOSED_ROWS_ONLY",
+  "account_or_history_complete": false,
+  "execution_enabled": false
+}
+```
+
 <a id="refresh"></a>
 ## 6. 刷新持仓：识别 → 提交 → 查回执
 
@@ -332,6 +374,18 @@
 ## 7. 扩展查询与旧版兼容
 
 ### 扩展查询
+
+以下三个接口均不接收参数，不切页，不触发登录、刷新或交易：
+
+| 接口 | 成功响应与边界 |
+|---|---|
+| `GET /v1/holdings/summary` | `HOLDINGS_SUMMARY_READ_ONLY`。沿用持仓列表的账户范围和时间字段，不含 `positions`；`observed_row_count` 为可见行数（可包括零持仓行），`held_symbol_count` 为 `total > 0` 的标的数，`sellable_symbol_count` 为 `available > 0` 的标的数。计数为零不等于全账户空仓。 |
+| `GET /v1/account/available-cash` | `AVAILABLE_CASH_READ_ONLY`。`cash_available` 为当前客户端可用金额的十进制字符串，另返回 `panel`、采集起止时间、`freshness_basis: CLIENT_UI_ONLY`、`upstream_freshness: UNVERIFIED` 和 `monetary_authority: NONE`。要求当前为持仓页且严格账户范围通过核验；不返回账号，不作为下单额度。 |
+| `GET /v1/real/form-discovery` | 真实运行时为 `REAL_FORM_READ_ONLY`。`form.fields` 返回代码、价格、数量输入框及标签的结构，`form.observed_confirmation` 是观察到的按钮文字。`selected_direction: null`、`transaction_qualified: false`，不据此认定方向或实盘就绪。结构无法确认时可返回 `503 FORM_ASSOCIATION_UNPROVEN`。 |
+
+持仓摘要和可用资金在当前为其他已识别面板时返回 `503 POSITIONS_PANEL_REQUIRED`，不会自动切换。资金无法可靠关联时返回 `503 CASH_ASSOCIATION_UNPROVEN`，不返回零作为替代。
+
+其他扩展查询：
 
 均为 GET，无参数、无请求体、不执行交易或自动登录。除当前面板观察外，以下部分查询可能切到目标面板并尝试复位；`allow_navigation=false` 且需要切页时拒绝。不要把可能切页的接口作为高频持仓轮询入口。每次响应只反映本次 AX 观察，不保证完整行情、账户、历史或跨接口原子性。
 
